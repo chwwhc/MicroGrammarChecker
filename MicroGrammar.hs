@@ -3,40 +3,42 @@ module MicroGrammar where
 import Text.Parsec
 
 type Identifier = String 
+type UnknownTok = (SourcePos, String)
 
 data Stmt = IfStmt SourcePos Expr Expr Expr
-    | WhileStmt SourcePos Expr Stmt 
+    | WhileStmt SourcePos Expr Expr
     | DoWhileStmt SourcePos Stmt Expr 
-    | ForStmt SourcePos Expr Expr Expr Stmt 
-    | ContStmt 
-    | BrkStmt 
+    | ForStmt SourcePos Stmt Expr Expr Stmt 
+    | ContStmt SourcePos 
+    | BrkStmt SourcePos 
     | SwitchStmt SourcePos Expr Stmt 
     | CaseStmt SourcePos Expr 
     | ReturnStmt SourcePos Expr 
     | ExprStmt SourcePos Expr 
+    | AssignStmt SourcePos Expr Expr 
     | CompoundStmt SourcePos [Stmt]
     | Line SourcePos Stmt
     | NoneStmt 
     deriving (Show)
 
 
-data Expr = WildCard SourcePos [String]
-    | TernOp SourcePos Expr Expr Expr 
-    | BinOp SourcePos BinOpSym Expr Expr 
-    | UnOp SourcePos UnOpSym Expr
-    | Assign SourcePos Expr Expr 
-    | VarDec SourcePos CType Identifier
-    | Ident SourcePos Identifier 
-    | FnCall SourcePos Identifier [Expr]
-    | ArrAccess SourcePos Expr Expr 
-    | MemAccess SourcePos Expr Expr 
-    | PtrAccess SourcePos Expr Expr
-    | Var SourcePos Identifier 
-    | Const SourcePos CVal
+data Expr = WildCard [UnknownTok]
+    | TernOp Expr Expr Expr 
+    | BinOp BinOpSym Expr Expr 
+    | UnaOp UnOpSym Expr
+    | VarDec CType Identifier
+    | Ident Identifier 
+    | FnCall Identifier [Expr]
+    | ArrAccess Expr Expr 
+    | MemAccess Expr Expr 
+    | PtrAccess Expr Expr
+    | Const CVal
+    | ExprLst [Expr]
     | NoneExpr
     deriving (Show)
 
 data CType = CInt 
+    | CBool 
     | CFloat 
     | CDouble 
     | CChar 
@@ -48,19 +50,18 @@ data CType = CInt
 
 data CVal = CIntVal Integer 
     | CFloatVal Float 
+    | CBoolVal Bool
     | CDoubleVal Double 
     | CCharVal Char 
-    | CVoidVal 
     | CStringVal String 
+    | NoneVal
     deriving (Show)
 
-data UnOpSym = Minus
-    | Plus
-    | Not 
+data UnOpSym = Not 
     | PreInc 
     | PreDec 
     | Addr 
-    | Indirec 
+    | DeRef
     | BitNeg 
     | Cast CType 
     | SizeOf 
