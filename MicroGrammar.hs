@@ -5,8 +5,8 @@ import Text.Parsec
 type Identifier = String 
 type UnknownTok = (SourcePos, String)
 
-data Stmt = IfStmt SourcePos Expr Expr Expr
-    | WhileStmt SourcePos Expr Expr
+data Stmt = IfStmt SourcePos Expr Stmt Stmt
+    | WhileStmt SourcePos Expr Stmt
     | DoWhileStmt SourcePos Stmt Expr 
     | ForStmt SourcePos Stmt Expr Expr Stmt 
     | ContStmt SourcePos 
@@ -34,6 +34,7 @@ data Expr = WildCard [UnknownTok]
     | PtrAccess Expr Expr
     | Const CVal
     | ExprLst [Expr]
+    | VoidExpr
     | NoneExpr
     deriving (Show)
 
@@ -53,7 +54,8 @@ data CVal = CIntVal Integer
     | CBoolVal Bool
     | CDoubleVal Double 
     | CCharVal Char 
-    | CStringVal String 
+    | CStringVal String
+    | CVoidVal 
     | NoneVal
     deriving (Show)
 
@@ -86,3 +88,4 @@ data BinOpSym = Add
     | And 
     | Or 
     deriving (Show)
+
