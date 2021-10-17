@@ -5,19 +5,21 @@ import Text.Parsec
 type Identifier = String 
 type UnknownTok = (SourcePos, String)
 
-data Stmt = IfStmt SourcePos Expr Stmt Stmt
+data Stmt = IfStmt SourcePos Expr Stmt
+    | ElifStmt SourcePos Expr Stmt 
+    | ElseStmt SourcePos Stmt 
     | WhileStmt SourcePos Expr Stmt
     | DoWhileStmt SourcePos Stmt Expr 
     | ForStmt SourcePos Stmt Expr Expr Stmt 
     | ContStmt SourcePos 
     | BrkStmt SourcePos 
     | SwitchStmt SourcePos Expr Stmt 
-    | CaseStmt SourcePos Expr 
+    | CaseStmt SourcePos Expr Stmt
+    | FnDefStmt SourcePos Type Expr [Expr] Stmt
     | ReturnStmt SourcePos Expr 
     | ExprStmt SourcePos Expr 
     | AssignStmt SourcePos Expr Expr 
-    | CompoundStmt SourcePos [Stmt]
-    | Line SourcePos Stmt
+    | BlockStmt SourcePos [Stmt]
     | NoneStmt 
     deriving (Show)
 
@@ -26,46 +28,47 @@ data Expr = WildCard [UnknownTok]
     | TernOp Expr Expr Expr 
     | BinOp BinOpSym Expr Expr 
     | UnaOp UnOpSym Expr
-    | VarDec CType Identifier
+    | VarDec Type Identifier
     | Ident Identifier 
     | FnCall Identifier [Expr]
     | ArrAccess Expr Expr 
     | MemAccess Expr Expr 
-    | PtrAccess Expr Expr
-    | Const CVal
-    | ExprLst [Expr]
+    | PtrMemAccess Expr Expr
+    | Atom Val
     | VoidExpr
     | NoneExpr
     deriving (Show)
 
-data CType = CInt 
-    | CBool 
-    | CFloat 
-    | CDouble 
-    | CChar 
-    | CVoid 
-    | CPointer CType
-    | CStruct Identifier  
+data Type = Int
+    | Bool
+    | Float 
+    | Double
+    | Char
+    | Void 
+    | Pointer Type
+    | Struct Identifier 
+    | Union Identifier  
     | NoneType
     deriving (Show)
 
-data CVal = CIntVal Integer 
-    | CFloatVal Float 
-    | CBoolVal Bool
-    | CDoubleVal Double 
-    | CCharVal Char 
-    | CStringVal String
-    | CVoidVal 
+data Val = IntVal Integer 
+    | FloatVal Double
+    | BoolVal Bool
+    | CharVal Char 
+    | ListVal [Val]
+    | VoidVal 
     | NoneVal
     deriving (Show)
 
 data UnOpSym = Not 
     | PreInc 
+    | PostInc
     | PreDec 
+    | PostDec
     | Addr 
     | DeRef
     | BitNeg 
-    | Cast CType 
+    | Cast Type 
     | SizeOf 
     deriving (Show)
 
