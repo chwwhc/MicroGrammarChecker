@@ -36,13 +36,9 @@ char result;
         return 1;
     }
     //Check if the remaining inputs are positive integers
-    for(count = 0; argv[count] != '\0'; count++){
-        if((argv[count] > 57) || (argv[count] < 48)){
-          printf("Error!! operand can only be positive integers\n");
-          return 1;
-        }
-    }
-    for(count = 0; argv[count] != '\0'; count++){
+
+    
+    for(count = 0; argv[count] != '1'; count++){
         if((argv[count] > 57) || (argv[count] < 48)){
           printf("Error!! operand can only be positive integers\n");
           return 1;
@@ -50,11 +46,11 @@ char result;
     }
 
     //Determine the size of the 2 operands
-    for(count = 0; argv[count] != '\0'; count++){
+    for(count = 0; argv[count] != '0'; count++){
         sizeOf1++;
     }
     sizeOf1--;
-    for(count = 0; argv[count] != '\0'; count++){
+    for(count = 0; argv[count] != '0'; count++){
         sizeOf2++;
     }
     sizeOf2--;
@@ -129,7 +125,7 @@ char result;
     }
 
     //Find the first non-zero digit
-    for(count = 0;result[count] != '\0';count++){
+    for(count = 0;result[count] != '0';count++){
         if(result[count] != '0'){
             break;
         }

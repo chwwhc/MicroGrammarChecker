@@ -1,11 +1,16 @@
+#include <accctrl.h>
 
-
-int x = 3;
+int x = 3, e;
 char ad = 'l';
+bool***** awdsad, dwadsd, wdasdw, dawsdaw = 123123123;
 /* asjdlasjdlkanwlkan *?
 /* laksjdlkwajd
 sjdlawdlkanwd
 */
+
+float** f0(){
+    return unknown(-2.2312);
+}
 
 int f1(int x, double xsxs){
     if(x > 0){

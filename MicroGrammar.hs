@@ -5,37 +5,37 @@ import Text.Parsec
 type Identifier = String 
 type UnknownTok = (SourcePos, String)
 
-data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
-    | ElseStmt SourcePos Stmt 
-    | WhileStmt SourcePos Expr Stmt
-    | DoWhileStmt SourcePos Stmt Expr 
-    | ForStmt SourcePos Stmt Expr Expr Stmt 
-    | ContStmt SourcePos 
-    | BrkStmt SourcePos 
-    | SwitchStmt SourcePos Expr Stmt 
-    | CaseStmt SourcePos Expr Stmt
-    | FnDefStmt SourcePos Type Expr [Expr] Stmt
-    | ReturnStmt SourcePos Expr 
-    | ExprStmt SourcePos Expr 
-    | AssignStmt SourcePos (Expr, Expr)
-    | LineStmt SourcePos [Stmt]
-    | BlockStmt SourcePos [Stmt]
-    | WildCardStmt SourcePos String
-    | NoneStmt 
+data Stmt = IfStmt Expr Stmt (Maybe Stmt)
+    | ElseStmt Stmt 
+    | WhileStmt Expr Stmt
+    | DoWhileStmt Stmt Expr 
+    | ForStmt Stmt Expr Expr Stmt 
+    | ContStmt 
+    | BrkStmt 
+    | SwitchStmt Expr Stmt 
+    | CaseStmt Expr Stmt
+    | FnDefStmt Type Expr [Expr] Stmt
+    | ReturnStmt Expr 
+    | ExprStmt Expr 
+    | BlockStmt [Stmt]
+    | VoidStmt 
     deriving (Show)
 
-data Expr = WildCard [UnknownTok]
-    | TernOp Expr Expr Expr 
+data Expr = WildCard String
+    | TernOp TerOpSym Expr Expr Expr 
     | BinOp BinOpSym Expr Expr 
     | UnaOp UnOpSym Expr
-    | VarDec Type Identifier
-    | Ident Identifier 
-    | FnCall Identifier [Expr]
-    | ArrAccess Expr Expr
-    | MemAccess Expr Expr 
-    | PtrMemAccess Expr Expr
-    | Atom Val
-    | VoidExpr
+    | PtrMemAcc SourcePos Expr Expr
+    | MemAcc SourcePos Expr Expr
+    | ArrAcc SourcePos Expr Expr
+    | Ident SourcePos Identifier 
+    | FnCall SourcePos Identifier [Expr]
+    | Atom SourcePos Val
+    | Assign BinOpSym Expr Expr
+    | VarDec Type [Expr]
+    | ArrInit SourcePos (Expr, Expr)
+    | ArrDec Type [Expr]
+    | VoidExpr SourcePos
     deriving (Show)
 
 data Type = Int
@@ -45,9 +45,11 @@ data Type = Int
     | Char
     | Void 
     | Pointer Type
+    | Reference Type
     | Array Type
     | Struct Identifier 
     | Union Identifier  
+    | Const Type
     deriving (Show)
 
 data Val = IntVal Integer 
@@ -66,8 +68,10 @@ data UnOpSym = Not
     | Addr 
     | DeRef
     | BitNeg 
-    | Cast Type 
+    | Pos 
+    | Minus
     | SizeOf 
+    | TypeCast Type
     deriving (Show)
 
 data BinOpSym = Add 
@@ -88,5 +92,19 @@ data BinOpSym = Add
     | BitXor 
     | And 
     | Or 
+    | NoOpAssign
+    | AddAssign
+    | SubAssign
+    | MulAssign
+    | DivAssign
+    | ModAssign 
+    | BitAndAssign
+    | BitOrAssign
+    | BitXorAssign
+    | RshftAssign
+    | LshftAssign
+    deriving (Show)
+
+data TerOpSym = TerIfElse 
     deriving (Show)
 
