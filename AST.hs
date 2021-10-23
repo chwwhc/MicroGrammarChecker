@@ -1,4 +1,4 @@
-module MicroGrammar where 
+module AST where 
 
 import Text.Parsec
 

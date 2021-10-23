@@ -1,5 +1,5 @@
 module Parser where
-import MicroGrammar
+import AST
 import Control.Monad
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
