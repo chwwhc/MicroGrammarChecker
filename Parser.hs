@@ -9,11 +9,7 @@ import qualified Text.ParserCombinators.Parsec.Token as Token
 {-- 
 todo： 
 wildcard parser
-switch case parser
-variable declaration parser 
-array initialization parser 
-struct parser 
-union parser 
+switch case parser 
 class parser
 --}
 
@@ -35,7 +31,7 @@ keySymbols = [
     ",", "(", ")", ">", "<", ">=", "<=", "!=",
     "[", "]", "{", "}", "#", "^", "~", "!", "%",
     "|", ".", "?", "==", ">>", "<<", "'", "\"",
-    ":", "->", "[]", "+=", "-=", "*=", "/=",
+    ":", "->", "[]", "+=", "-=", "*=", "/=", ";",
     "%=", "&=", "|=", "^=", ">>=", "<<=", "sizeof"
         ]
 
@@ -75,7 +71,8 @@ float :: Parser Double
 float = Token.float lexer
 
 stmtParser :: Parser Stmt
-stmtParser = whileParser
+stmtParser = skipPrePros
+    <|> whileParser
     <|> ifParser
     <|> try fnDefParser
     <|> switchParser
@@ -86,16 +83,13 @@ stmtParser = whileParser
     <|> doWhileParser
     <|> try lnParser
     <|> try blockParser
-    <|> try wcStmtParser
     <?> "statement"
 
 lnParser :: Parser Stmt
 lnParser = do {
-    ExprStmt <$> exprParser <* (try (semi *> whiteSpace) <|> whiteSpace);
+    tp <- optionMaybe typeParser;
+    LineStmt tp <$> (exprParser `sepBy` comma) <* try semi;
 } <?> "comma separated line statement"
-
-wcStmtParser :: Parser Stmt
-wcStmtParser = ExprStmt <$> exprParser
 
 returnParser :: Parser Stmt
 returnParser = do {
@@ -197,7 +191,12 @@ atomTpParser = (reserved "int" >> return Int)
     <|> (choice [reserved "bool", reserved "boolean"] >> return Bool)
     <|> (reserved "void" >> return Void)
     <|> (reserved "string" >> return (Pointer Char))
+    <|> strUnParser "struct"
+    <|> strUnParser "union"
     <?> "Atomic Type"
+
+strUnParser :: String -> Parser Type
+strUnParser s = reserved s >> Struct <$> identifier;
 
 ptrTpParser :: Parser (Type -> Type)
 ptrTpParser = do {
@@ -218,43 +217,15 @@ typeParser = buildExpressionParser tpTbl atomTpParser
                     postfixChain refTpParser]]
 
 exprParser :: Parser Expr
-exprParser = try arrDecParser
-    <|> try varDecParser
-    <|> buildExpressionParser opTable term
+exprParser = buildExpressionParser opTable term
     <?> "operator expression"
 
--- not correct
-varDecParser :: Parser Expr
-varDecParser = do {
-    tp <- typeParser;
-    VarDec tp <$> (exprParser `sepBy` comma);
-}
-
-arrDecParser' :: Parser Expr
-arrDecParser' = do {
-    buildExpressionParser [[postfixChain arrInit]] (identParser <* lookAhead (symbol "["));
-}
-    where arrInit = do {
-    pos <- getPosition;
-    idx <- brackets atomParser;
-    return $ \lst -> ArrInit pos (lst, idx);
-}
-
--- not correct
-arrDecParser :: Parser Expr
-arrDecParser = do {
-    tp <- typeParser;
-    ArrDec tp <$> (arrDecParser' `sepBy` comma)
-}
-
-{-- 
 wildCardParser :: Parser Expr
 wildCardParser = do {
     pos <- getPosition;
-    wc <- whiteSpace *> many (noneOf " \t\n\r\f\v") <* whiteSpace;
+    wc <- whiteSpace *> many (noneOf " \t\n\r\f\v;") <* whiteSpace;
     return $ WildCard wc;
 }
---}
 
 identParser :: Parser Expr
 identParser = do {
@@ -286,8 +257,15 @@ atomParser = try floatParser
     <|> try strParser
     <|> try intParser
     <|> try fnCallParser
+    <|> try lstValParser
     <|> identParser
     <?> "constant"
+
+lstValParser :: Parser Expr
+lstValParser = do {
+    pos <- getPosition;
+    Atom pos . ListVal <$> braces (atomParser `sepBy` comma);
+}
 
 intParser :: Parser Expr
 intParser = do {
@@ -328,7 +306,7 @@ floatParser = do {
 term :: Parser Expr
 term = atomParser
     <|> parens exprParser
-    -- <|> wildCardParser
+    <|> wildCardParser
 
 terOpParser :: Parser (Expr -> Expr)
 terOpParser = do {
@@ -420,6 +398,12 @@ opTable = [
         binary "^=" (Assign BitXorAssign) AssocRight,
         binary "|=" (Assign BitOrAssign) AssocRight]
     ]
+
+skipPrePros :: Parser Stmt
+skipPrePros = do {
+    reservedOp "#" >> skipMany1 (noneOf "\n\r") >> whiteSpace;
+    return PreProsStmt;
+}
 
 parseStmt :: String -> Stmt
 parseStmt str = case parse stmtParser "" str of

@@ -16,9 +16,10 @@ data Stmt = IfStmt Expr Stmt (Maybe Stmt)
     | CaseStmt Expr Stmt
     | FnDefStmt Type Expr [Expr] Stmt
     | ReturnStmt Expr 
-    | ExprStmt Expr 
+    | LineStmt (Maybe Type) [Expr] 
     | BlockStmt [Stmt]
-    | VoidStmt 
+    | UnknownStmt 
+    | PreProsStmt
     deriving (Show)
 
 data Expr = WildCard String
@@ -32,9 +33,6 @@ data Expr = WildCard String
     | FnCall SourcePos Identifier [Expr]
     | Atom SourcePos Val
     | Assign BinOpSym Expr Expr
-    | VarDec Type [Expr]
-    | ArrInit SourcePos (Expr, Expr)
-    | ArrDec Type [Expr]
     | VoidExpr SourcePos
     deriving (Show)
 
@@ -57,6 +55,7 @@ data Val = IntVal Integer
     | BoolVal Bool
     | CharVal Char 
     | StrVal String
+    | ListVal [Expr]
     | VoidVal 
     deriving (Show)
 

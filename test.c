@@ -1,4 +1,7 @@
-#include <accctrl.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h> 
+#include <stdbool.h>
 
 int x = 3, e;
 char ad = 'l';
@@ -21,7 +24,7 @@ int f1(int x, double xsxs){
     return x;
 }
 
-boolean longerThan3(char* str){
+bool longerThan3(char* str){
     if(length(str) > 3){
         return true;
     }
@@ -29,5 +32,5 @@ boolean longerThan3(char* str){
 }
 
 void xor2(int x){
-    *x ^ 2;
+    x ^ 2;
 }

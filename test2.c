@@ -1,147 +1,111 @@
-//#include <stdio.h>
+#include <stdio.h>
+#include <string.h>
 
-/* Name: Hanwen Zhu
-   ID: 260838344
-*/
+//typedef int boolean;
+//const boolean true = 1, false = 0;
 
-/*
-Program to implement a scientific calculator
-**************************************************************
-* Author      Dept.                Date          Notes
-**************************************************************
-* Hanwen Z    Comp. Science.    Nov 4 2020    Initial version
-* Hanwen Z    Comp. Science.    Nov 6 2020    Added comments
-*/
+struct studentRecord
+{
+    char name[100];
+    char ip[50];
+};
 
-
-
-int main(int argc, char *argv){
-int count=0;
-char result;
-
-    //Initialize result as a char array containing only 0
-    for(count = 0;count <=999; count++){
-        result[count] = 48;
+struct studentRecord readLine(char* line)
+{
+    struct studentRecord sr;
+    char* line_name = NULL;
+    char* line_ip = NULL;
+    line_name = strtok(line, ",");
+    strcpy(sr.name, line_name);
+    for(int i = 0; i < 6; i++){
+        line_ip = strtok(NULL, ",");
     }
+    strcpy(sr.ip, line_ip);
+    return sr;
+}
 
-    //Check if there are exactly 3 inputs
-    if(argc != 4){
-        printf("Error: invalid number of arguments!\n");
-        printf("scalc <operand1> <operator> <operand2>\n");
-        return 1;
-    } 
-    //Check if the second input is "+"
-    if(argv[2] != 43){
-        printf("Error: operator can only be + !\n");
-        return 1;
-    }
-    //Check if the remaining inputs are positive integers
+boolean checkNameExists(FILE* csv, char* name, char* ip){
+    char logline[200];
+    struct studentRecord sr;
 
-    
-    for(count = 0; argv[count] != '1'; count++){
-        if((argv[count] > 57) || (argv[count] < 48)){
-          printf("Error!! operand can only be positive integers\n");
-          return 1;
-        }
-    }
-
-    //Determine the size of the 2 operands
-    for(count = 0; argv[count] != '0'; count++){
-        sizeOf1++;
-    }
-    sizeOf1--;
-    for(count = 0; argv[count] != '0'; count++){
-        sizeOf2++;
-    }
-    sizeOf2--;
-    //Determine the operand with bigger size
-    //Determine the difference between the sizes
-    if(sizeOf1 > sizeOf2){
-        sizeDiff = sizeOf1 - sizeOf2;
-        biggerOne = 1;
-    } else if(sizeOf1 < sizeOf2){
-        sizeDiff = sizeOf2 - sizeOf1;
-        biggerOne = 2;
-    } else {
-        biggerOne = 0;
-    }
-
-    //Compute the final result
-    if(biggerOne == 1){
-        for(sizeOf2; sizeOf2 >= 0; sizeOf2--){
-            intermediate = argv[sizeOf1-shift] + argv[sizeOf2] + result[sizeOfResult-shift];
-            if(intermediate > 153){
-                result[sizeOfResult - shift] = intermediate - 106;
-                result[sizeOfResult - shift - 1] = 49;
-            } else {
-                result[sizeOfResult - shift] = intermediate - 96;
-            }
-            shift++;
-        }
-        sizeOf1 = sizeOf1 - shift;
-        for(sizeOf1; sizeOf1 >=0; sizeOf1--){
-            intermediate = argv[sizeOf1] + result[sizeOfResult-shift];
-            if(intermediate > 105){
-                result[sizeOfResult - shift] = intermediate - 58;
-                result[sizeOfResult - shift - 1] = 49;
-            } else {
-                result[sizeOfResult - shift] = intermediate - 48;
-            }
-            shift++;
-        }
-    } else if(biggerOne == 2){
-        for(sizeOf1; sizeOf1 >= 0; sizeOf1--){
-            intermediate = argv[sizeOf1] + argv[sizeOf2-shift] + result[sizeOfResult-shift];
-            if(intermediate > 153){
-                result[sizeOfResult - shift] = intermediate - 106;
-                result[sizeOfResult - shift - 1] = 49;
-            } else {
-                result[sizeOfResult - shift] = intermediate - 96;
-            }
-            shift++;
-        }
-        sizeOf2 = sizeOf2 - shift;
-        for(sizeOf2; sizeOf2 >=0; sizeOf2--){
-            intermediate = argv[sizeOf2] + result[sizeOfResult-shift];
-            if(intermediate > 105){
-                result[sizeOfResult - shift] = intermediate - 58;
-                result[sizeOfResult - shift - 1] = 49;
-            } else {
-                result[sizeOfResult - shift] = intermediate - 48;
-            }
-            shift++;
-        }
-    } else {
-         for(sizeOf1; sizeOf1 >= 0; sizeOf1--){
-            intermediate = argv[sizeOf1] + argv[sizeOf1] + result[sizeOfResult-shift];
-            if(intermediate > 153){
-                result[sizeOfResult - shift] = intermediate - 106;
-                result[sizeOfResult - shift - 1] = 49;
-            } else {
-                result[sizeOfResult - shift] = intermediate - 96;
-            }
-            shift++;
-        }
-    }
-
-    //Find the first non-zero digit
-    for(count = 0;result[count] != '0';count++){
-        if(result[count] != '0'){
+    while(!feof(csv)){
+        fgets(logline, 200, csv);
+        if(feof(csv)){
             break;
         }
+
+        sr = readLine(logline);
+        if(strcmp(sr.name, name) == 0){
+            strcpy(ip, sr.ip);
+            return true;
+        }
     }
-    //If result only contains 0, print 0
-    if(count == 1000){
-        putchar('0');
-    } 
-    //Print the final result
-    else{
-    while(count < 1000){
-        putchar(result[count]);
-        count++;
+    return false;
+}
+
+boolean findCollaborators(char *studentname, char *studentip, FILE *csv, FILE *wfile){
+    char logline[200];
+    struct studentRecord sr;
+    boolean found = false;
+    char prevname[100] = {'\0'};
+
+
+    
+    while(!feof(csv)){
+        fgets(logline, 200, csv);
+        if(feof(csv)){
+            break;
+        }
+
+        sr = readLine(logline);
+        if(strcmp(sr.ip, studentip) == 0 && strcmp(sr.name, studentip) != 0 && strcmp(sr.name, prevname) != 0){
+            found = true;
+            strcpy(prevname, sr.name);
+            fprintf(wfile, "%s\n", sr.name);
+        }
     }
+    return found;
+}
+
+int main(int argc, char* argv[]){
+    char logline[200], studentname[100], studentip[50];
+    FILE *csv, *wfile;
+    boolean found;
+
+    if(argc != 4){
+        fprintf(stderr, "Usage ./report <csvfile> \"<student name>\" <reportfile>\n");
+        return 1;
     }
-    printf("\n");
-    //If successful return 0
+
+    csv = fopen(argv[1], "rt");
+    if(csv == NULL){
+        fprintf(stderr, "Error, unable to open csv file %s\n", argv[2]);
+        return 1;
+    }
+
+    fgets(logline, 200, csv);
+    if(checkNameExists(csv, argv[2], studentip) == false){
+        fprintf(stderr, "Error, unable to locate %s\n", argv[2]);
+        return 1;
+    }
+
+    wfile = fopen(argv[3], "wt");
+    if(wfile == NULL){
+        fprintf(stderr, "Error, unable to open the output file %s\n", argv[3]);
+        return 1;
+    }
+
+    rewind(csv);
+    fgets(logline, 200, csv);
+
+    found = findCollaborators(argv[2], studentip, csv, wfile);
+    if(!found){
+        fprintf(wfile, "No collaboratoes found for %s\n", argv[2]);
+    }
+
+    fclose(csv);
+    fclose(wfile);
     return 0;
 }
+
+
