@@ -5,24 +5,29 @@ import Text.Parsec
 type Identifier = String 
 type UnknownTok = (SourcePos, String)
 
-data Stmt = IfStmt Expr Stmt (Maybe Stmt)
-    | ElseStmt Stmt 
-    | WhileStmt Expr Stmt
-    | DoWhileStmt Stmt Expr 
-    | ForStmt Stmt Expr Expr Stmt 
+data Dec = FnDec Identifier Dec Stmt 
+    | VarDec [(Type, Identifier)]
+    deriving (Show)
+
+data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
+    | ElseStmt SourcePos Stmt 
+    | WhileStmt SourcePos Expr Stmt
+    | DoWhileStmt SourcePos Stmt Expr 
+    | ForStmt SourcePos Expr Expr Expr Stmt 
     | ContStmt 
     | BrkStmt 
-    | SwitchStmt Expr Stmt 
-    | CaseStmt Expr Stmt
-    | FnDefStmt Type Expr [Expr] Stmt
+    | SwitchStmt SourcePos Expr Stmt 
+    | CaseStmt SourcePos Expr Stmt
+    | DefaultStmt SourcePos Stmt
+    | DecStmt Dec
     | ReturnStmt Expr 
-    | LineStmt (Maybe Type) [Expr] 
+    | LineStmt Expr
     | BlockStmt [Stmt]
     | UnknownStmt 
     | PreProsStmt
     deriving (Show)
 
-data Expr = WildCard String
+data Expr = WildCard [String]
     | TernOp TerOpSym Expr Expr Expr 
     | BinOp BinOpSym Expr Expr 
     | UnaOp UnOpSym Expr
@@ -48,6 +53,7 @@ data Type = Int
     | Struct Identifier 
     | Union Identifier  
     | Const Type
+    | Unknown Identifier
     deriving (Show)
 
 data Val = IntVal Integer 
