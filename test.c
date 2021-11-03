@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h> 
@@ -6,12 +7,14 @@
 int x = 3, e;
 char ad = 'l';
 bool***** awdsad, dwadsd, wdasdw, dawsdaw = 123123123;
-/* asjdlasjdlkanwlkan *?
+/* asjdlasjdlkanwlkan *? */
 /* laksjdlkwajd
 sjdlawdlkanwd
 */
 
 float** f0(){
+    h++;
+    char* s = "test";
     return unknown(-2.2312);
 }
 
@@ -20,8 +23,8 @@ int f1(int x, double xsxs){
         return 3;
     }else if(x == 0){
         return 4;
-    } //1231sdxw
-    return x;
+    } 
+   return x;
 }
 
 bool longerThan3(char* str){
@@ -33,4 +36,5 @@ bool longerThan3(char* str){
 
 void xor2(int x){
     x ^ 2;
+    //return 2;
 }

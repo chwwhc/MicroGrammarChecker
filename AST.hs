@@ -5,10 +5,6 @@ import Text.Parsec
 type Identifier = String 
 type UnknownTok = (SourcePos, String)
 
-data Dec = FnDec Identifier Dec Stmt 
-    | VarDec [(Type, Identifier)]
-    deriving (Show)
-
 data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ElseStmt SourcePos Stmt 
     | WhileStmt SourcePos Expr Stmt
@@ -19,10 +15,10 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | SwitchStmt SourcePos Expr Stmt 
     | CaseStmt SourcePos Expr Stmt
     | DefaultStmt SourcePos Stmt
-    | DecStmt Dec
+    | FnDecStmt SourcePos Identifier [Expr] Stmt
     | ReturnStmt Expr 
     | LineStmt Expr
-    | BlockStmt [Stmt]
+    | BodyStmt [Stmt]
     | UnknownStmt 
     | PreProsStmt
     deriving (Show)
