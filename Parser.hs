@@ -68,10 +68,20 @@ charLiteral = Token.charLiteral lexer
 stringLiteral :: Parser String
 stringLiteral = Token.stringLiteral lexer
 
-parseWcStmt :: Stmt -> Stmt 
-parseWcStmt stmt = case stmt of 
-    IfStmt pos ex trBr Nothing -> IfStmt pos (exprParser ex) (parseWcStmt trBr) Nothing 
+parseWcStmt :: Stmt -> Stmt
+parseWcStmt stmt = case stmt of
+    IfStmt pos ex trBr Nothing -> IfStmt pos (exprParser ex) (parseWcStmt trBr) Nothing
     IfStmt pos ex trBr (Just elBr) -> IfStmt pos (exprParser ex) (parseWcStmt trBr) (Just (parseWcStmt elBr))
+    WhileStmt pos ex st -> WhileStmt pos (exprParser ex) (parseWcStmt st)
+    DoWhileStmt pos st ex -> DoWhileStmt pos (parseWcStmt st) (exprParser ex)
+    ForStmt pos dec cond upd st -> ForStmt pos (exprParser dec) (exprParser cond) (exprParser upd) (parseWcStmt st)
+    SwitchStmt pos ex st -> SwitchStmt pos (exprParser ex) (parseWcStmt st)
+    CaseStmt pos ex st -> CaseStmt pos (exprParser ex) (parseWcStmt st)
+    DefaultStmt pos st -> DefaultStmt pos (parseWcStmt st)
+    FnDecStmt pos name ex_lst st -> FnDecStmt pos name (multExprParser ex_lst) (parseWcStmt st)
+    ReturnStmt ex -> ReturnStmt (exprParser ex)
+    LineStmt ex -> LineStmt (multExprParser ex)
+    BodyStmt st_lst -> BodyStmt (parseWcStmt <$> st_lst)
     other -> other
 
 -- not complete
@@ -89,7 +99,11 @@ stmtParser = skipPrePros
     <|> brkParser
     <|> doWhileParser
     <|> try bodyParser
-    <|> try (whiteSpace >> lookAhead (noneOf ")}];") >> (LineStmt . WildCard <$> skipTo ";") <* whiteSpace)
+    <|> try (do {
+        whiteSpace >> lookAhead (noneOf ")}];");
+        ex <- skipTo ";" <* whiteSpace;
+        return $ LineStmt [WildCard ex]
+        })
     <?> "any statement"
 
 returnParser :: Parser Stmt
@@ -206,9 +220,15 @@ typeParser = buildExpressionParser tpTbl atomTpParser <?> "typr"
 
 exprParser :: Expr -> Expr
 exprParser (WildCard wc) = case parse exprParser' "" (unwords wc) of
-    Right ex -> ex 
-    Left err -> WildCard wc 
+    Right ex -> ex
+    Left err -> WildCard wc
 exprParser other = other
+
+multExprParser :: [Expr] -> [Expr]
+multExprParser [WildCard wc] = case parse (exprParser' `sepBy` comma) "" (unwords wc) of
+  Right ex -> ex
+  Left err -> [WildCard wc]
+
 
 
 exprParser' :: Parser Expr
@@ -400,7 +420,7 @@ parseStmt str = case parse stmtParser "" str of
 parseFile :: String -> IO [Stmt]
 parseFile f = do {
     codes <- readFile f;
-    case parse (whiteSpace *> manyTill stmtParser eof) "" codes of
+    case parse (whiteSpace *> manyTill (parseWcStmt <$> stmtParser) eof) "" codes of
         Left e -> print e >> fail "failed to parse the source file"
         Right r -> return r
 }

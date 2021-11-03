@@ -6,7 +6,6 @@ type Identifier = String
 type UnknownTok = (SourcePos, String)
 
 data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
-    | ElseStmt SourcePos Stmt 
     | WhileStmt SourcePos Expr Stmt
     | DoWhileStmt SourcePos Stmt Expr 
     | ForStmt SourcePos Expr Expr Expr Stmt 
@@ -17,7 +16,7 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | DefaultStmt SourcePos Stmt
     | FnDecStmt SourcePos Identifier [Expr] Stmt
     | ReturnStmt Expr 
-    | LineStmt Expr
+    | LineStmt [Expr]
     | BodyStmt [Stmt]
     | UnknownStmt 
     | PreProsStmt
