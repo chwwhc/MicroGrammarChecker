@@ -15,7 +15,7 @@ keyWords = [
         "struct", "switch", "typedef", "union",
         "unsigned", "void", "volatile", "while", "double",
         "else", "enum", "extern", "float", "for", "goto",
-        "String", "string", "bool", "boolean"
+        "String", "string", "bool", "boolean", "public"
             ]
 
 keySymbols :: [String]
@@ -78,10 +78,12 @@ parseWcStmt stmt = case stmt of
     SwitchStmt pos ex st -> SwitchStmt pos (exprParser ex) (parseWcStmt st)
     CaseStmt pos ex st -> CaseStmt pos (exprParser ex) (parseWcStmt st)
     DefaultStmt pos st -> DefaultStmt pos (parseWcStmt st)
-    FnDecStmt pos name ex_lst st -> FnDecStmt pos name (multExprParser ex_lst) (parseWcStmt st)
+    FnDecStmt pos name ex_lst st -> FnDecStmt pos name (argsParser ex_lst) (parseWcStmt st)
     ReturnStmt ex -> ReturnStmt (exprParser ex)
     LineStmt ex -> LineStmt (multExprParser ex)
     BodyStmt st_lst -> BodyStmt (parseWcStmt <$> st_lst)
+    UnknownStmt pos Nothing -> UnknownStmt pos Nothing
+    UnknownStmt pos (Just st) -> UnknownStmt pos (Just (parseWcStmt st))
     other -> other
 
 -- not complete
@@ -89,7 +91,7 @@ stmtParser :: Parser Stmt
 stmtParser = skipPrePros
     <|> whileParser
     <|> ifParser
-    <|> try fnDefParser
+    <|> try fnDecParser
     <|> switchParser
     <|> caseParser
     <|> dfltParser
@@ -98,19 +100,29 @@ stmtParser = skipPrePros
     <|> contParser
     <|> brkParser
     <|> doWhileParser
-    <|> try bodyParser
-    <|> try (do {
-        whiteSpace >> lookAhead (noneOf ")}];");
-        ex <- skipTo ";" <* whiteSpace;
-        return $ LineStmt [WildCard ex]
-        })
+    <|> try lineParser
+    <|> try unknwnParser
     <?> "any statement"
+
+lineParser :: Parser Stmt
+lineParser = do {
+        whiteSpace >> lookAhead (noneOf "(){}[]");
+        ex <- (try (skipTo ";") <|> try (skipTo ":")) <* whiteSpace;
+        return $ LineStmt [WildCard ex]
+        }
+
+unknwnParser :: Parser Stmt
+unknwnParser = do {
+    pos <- getPosition <* skipMany1 (noneOf "{}");
+    UnknownStmt pos <$> optionMaybe bodyParser;
+}
 
 returnParser :: Parser Stmt
 returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";") <?> "return statement"
 
 bodyParser :: Parser Stmt
-bodyParser = BodyStmt <$> braces (many stmtParser <* whiteSpace) <?> "compound statement"
+bodyParser = try (BodyStmt <$> braces (many stmtParser) <* whiteSpace)
+        <|> try (BodyStmt <$> ((:[]) <$> stmtParser) <* whiteSpace) <?> "compound statement"
 
 ifParser :: Parser Stmt
 ifParser = do {
@@ -165,7 +177,7 @@ forParser = do {
     pos <- pRsrvd "for" <* symbol "(";
     varDec <- skipTo ";";
     endCond <- skipTo ";";
-    varUpdate <- skipTo ")";
+    varUpdate <- skipTo ")" <* whiteSpace;
     ForStmt pos (WildCard varDec) (WildCard endCond) (WildCard varUpdate) <$> bodyParser;
 } <?> "for statement"
 
@@ -175,15 +187,14 @@ contParser = (reserved "continue" <* semi) >> return ContStmt <?> "continue stat
 brkParser :: Parser Stmt
 brkParser = (reserved "break" <* semi) >> return BrkStmt <?> "break statement"
 
-fnDefParser :: Parser Stmt
-fnDefParser = do {
+fnDecParser :: Parser Stmt
+fnDecParser = do {
     pos <- manyTill anyToken space >> getPosition <* whiteSpace;
     name <- identifier <* whiteSpace;
     args <- lookAhead (symbol "(") >> balancedP;
     FnDecStmt pos name [WildCard args] <$> bodyParser;
 } <?> "function definition statement"
 
--- Not complete
 atomTpParser :: Parser Type
 atomTpParser = (reserved "int" >> return Int)
     <|> (reserved "char" >> return Char)
@@ -194,7 +205,7 @@ atomTpParser = (reserved "int" >> return Int)
     <|> (reserved "string" >> return (Pointer Char))
     <|> strUnParser "struct"
     <|> strUnParser "union"
-    -- <|> Unknown <$> anyTkn
+    <|> try (UnknownType <$> identifier <* lookAhead identifier)
     <?> "Atomic Type"
 
 strUnParser :: String -> Parser Type
@@ -213,10 +224,21 @@ refTpParser = do {
 } <?> "reference"
 
 typeParser :: Parser Type
-typeParser = buildExpressionParser tpTbl atomTpParser <?> "typr"
+typeParser = buildExpressionParser tpTbl atomTpParser <?> "type"
     where tpTbl = [[prefix "const" Const,
                     postfixChain ptrTpParser,
                     postfixChain refTpParser]]
+
+multExprParser' :: Parser [Expr]
+multExprParser' = try (do { tp <- typeParser; varDecParser tp `sepBy` comma;})
+            <|> try (exprParser' `sepBy` comma)
+
+multExprParser :: [Expr] -> [Expr]
+multExprParser [WildCard wc] =
+    case parse multExprParser' "" (unwords wc) of
+        Right ex -> ex
+        Left err -> [WildCard wc]
+multExprParser other = other
 
 exprParser :: Expr -> Expr
 exprParser (WildCard wc) = case parse exprParser' "" (unwords wc) of
@@ -224,12 +246,13 @@ exprParser (WildCard wc) = case parse exprParser' "" (unwords wc) of
     Left err -> WildCard wc
 exprParser other = other
 
-multExprParser :: [Expr] -> [Expr]
-multExprParser [WildCard wc] = case parse (exprParser' `sepBy` comma) "" (unwords wc) of
+argsParser :: [Expr] -> [Expr]
+argsParser [WildCard wc] = case parse ((typeParser >>= varDecParser) `sepBy` comma) "" (unwords wc) of
   Right ex -> ex
   Left err -> [WildCard wc]
 
-
+varDecParser :: Type -> Parser Expr
+varDecParser tp = do { var <- exprParser'; return $ VarDec (tp, var); }
 
 exprParser' :: Parser Expr
 exprParser' = buildExpressionParser opTable term
@@ -248,12 +271,12 @@ fnCallParser = do {
     symbol "(";
     try (do {
         symbol ")";
-        return $ FnCall pos name [];
+        return $ Call pos name [];
     })
     <|> (do {
     ex <- exprParser' `sepBy` comma;
     symbol ")";
-    return $ FnCall pos name ex;
+    return $ Call pos name ex;
     }
     )
 }
@@ -273,7 +296,7 @@ lstValParser :: Parser Expr
 lstValParser = do {
     pos <- getPosition;
     Atom pos . ListVal <$> braces (atomParser `sepBy` comma);
-}
+}<?> "array"
 
 intParser :: Parser Expr
 intParser = do {
@@ -312,7 +335,7 @@ floatParser = do {
 }<?> "floating point number"
 
 term :: Parser Expr
-term = atomParser
+term = try atomParser
     <|> parens exprParser'
 
 terOpParser :: Parser (Expr -> Expr)
@@ -420,13 +443,13 @@ parseStmt str = case parse stmtParser "" str of
 parseFile :: String -> IO [Stmt]
 parseFile f = do {
     codes <- readFile f;
-    case parse (whiteSpace *> manyTill (parseWcStmt <$> stmtParser) eof) "" codes of
+    case parse (whiteSpace *> manyTill (try (parseWcStmt <$> stmtParser)) eof) "" codes of
         Left e -> print e >> fail "failed to parse the source file"
         Right r -> return r
 }
 
 skipTo :: String -> Parser [String]
-skipTo p = (string p >> return [])
+skipTo p = try (string p >> return [])
         <|> (:) <$> anyTkn <*> skipTo p
 
 pRsrvd :: String -> Parser SourcePos
@@ -436,7 +459,7 @@ pRsrvd rsrvd = getPosition <* reserved rsrvd
 Not complete
 --}
 anyTkn :: Parser String
-anyTkn = lexeme (try (do {
+anyTkn = whiteSpace >> lexeme (try (do {
                 name <- identifier;
                 idx <- many1 (do {
                     l <- symbol "[";
@@ -473,8 +496,9 @@ anyTkn = lexeme (try (do {
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keySymbols)) -- reserved symbol
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keyWords)) -- reserved word
         <|> try (fmap show integer) -- integer
-        -- non-terminating when parsing " ", caused by the next line 
-        <|> try (manyTill anyToken (try eof <|> try (void (lookAhead anyTkn)))) -- last resort: any token
+        -- non-terminating when parsing " " caused by the next line 
+        <|> try (eof >> error "end of file")
+        <|> try (manyTill anyToken (lookAhead anyTkn)) -- last resort: any token
         )
     where parseRsrvd tbl = case tbl of
             [] -> fail "not in table"

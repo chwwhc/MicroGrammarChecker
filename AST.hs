@@ -18,7 +18,7 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ReturnStmt Expr 
     | LineStmt [Expr]
     | BodyStmt [Stmt]
-    | UnknownStmt 
+    | UnknownStmt SourcePos (Maybe Stmt)
     | PreProsStmt
     deriving (Show)
 
@@ -30,9 +30,10 @@ data Expr = WildCard [String]
     | MemAcc SourcePos Expr Expr
     | ArrAcc SourcePos Expr Expr
     | Ident SourcePos Identifier 
-    | FnCall SourcePos Identifier [Expr]
+    | Call SourcePos Identifier [Expr]
     | Atom SourcePos Val
-    | Assign BinOpSym Expr Expr
+    | Assign BinOpSym Expr Expr 
+    | VarDec (Type, Expr)
     | VoidExpr SourcePos
     deriving (Show)
 
@@ -48,7 +49,7 @@ data Type = Int
     | Struct Identifier 
     | Union Identifier  
     | Const Type
-    | Unknown Identifier
+    | UnknownType Identifier
     deriving (Show)
 
 data Val = IntVal Integer 
