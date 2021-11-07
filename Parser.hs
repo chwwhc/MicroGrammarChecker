@@ -31,6 +31,8 @@ keySymbols = [
 
 languageDef = javaStyle {
     Token.nestedComments = False,
+    Token.identStart = letter <|> char '_',
+    Token.identLetter = alphaNum <|> char '_',
     Token.reservedNames = keyWords,
     Token.reservedOpNames = keySymbols,
     Token.caseSensitive = True
@@ -74,7 +76,7 @@ parseWcStmt stmt = case stmt of
     IfStmt pos ex trBr (Just elBr) -> IfStmt pos (exprParser ex) (parseWcStmt trBr) (Just (parseWcStmt elBr))
     WhileStmt pos ex st -> WhileStmt pos (exprParser ex) (parseWcStmt st)
     DoWhileStmt pos st ex -> DoWhileStmt pos (parseWcStmt st) (exprParser ex)
-    ForStmt pos dec cond upd st -> ForStmt pos (exprParser dec) (exprParser cond) (exprParser upd) (parseWcStmt st)
+    ForStmt pos dec cond upd st -> ForStmt pos (head $ multExprParser [dec]) (exprParser cond) (exprParser upd) (parseWcStmt st)
     SwitchStmt pos ex st -> SwitchStmt pos (exprParser ex) (parseWcStmt st)
     CaseStmt pos ex st -> CaseStmt pos (exprParser ex) (parseWcStmt st)
     DefaultStmt pos st -> DefaultStmt pos (parseWcStmt st)
@@ -82,16 +84,16 @@ parseWcStmt stmt = case stmt of
     ReturnStmt ex -> ReturnStmt (exprParser ex)
     LineStmt ex -> LineStmt (multExprParser ex)
     BodyStmt st_lst -> BodyStmt (parseWcStmt <$> st_lst)
-    UnknownStmt pos Nothing -> UnknownStmt pos Nothing
-    UnknownStmt pos (Just st) -> UnknownStmt pos (Just (parseWcStmt st))
     other -> other
 
 -- not complete
 stmtParser :: Parser Stmt
 stmtParser = skipPrePros
+    <|> try fnDecParser
+    <|> try skipNewType
+    <|> goToParser
     <|> whileParser
     <|> ifParser
-    <|> try fnDecParser
     <|> switchParser
     <|> caseParser
     <|> dfltParser
@@ -100,29 +102,36 @@ stmtParser = skipPrePros
     <|> contParser
     <|> brkParser
     <|> doWhileParser
-    <|> try lineParser
-    <|> try unknwnParser
+    <|> lineParser
     <?> "any statement"
+
+skipNewType :: Parser Stmt 
+skipNewType = do {
+    (reserved "typedef" >> (reserved "struct" <|> reserved "union")) <|> reserved "struct" <|> reserved "union";
+    identifier >> lookAhead (symbol "{");
+    bodyParser >> skipTo ";";
+    return OtherStmt;
+} <?> "struct or union definition"
+
+skipPrePros :: Parser Stmt
+skipPrePros = do {
+    reservedOp "#" >> skipMany1 (noneOf "\n\r") >> whiteSpace;
+    return OtherStmt;
+} <?> "preprocessors"
 
 lineParser :: Parser Stmt
 lineParser = do {
-        whiteSpace >> lookAhead (noneOf "(){}[]");
-        ex <- (try (skipTo ";") <|> try (skipTo ":")) <* whiteSpace;
+        whiteSpace >> lookAhead (noneOf "{}[]");
+        ex <- skipTo ";" <* whiteSpace;
         return $ LineStmt [WildCard ex]
         }
 
-unknwnParser :: Parser Stmt
-unknwnParser = do {
-    pos <- getPosition <* skipMany1 (noneOf "{}");
-    UnknownStmt pos <$> optionMaybe bodyParser;
-}
-
 returnParser :: Parser Stmt
-returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";") <?> "return statement"
+returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";" <* whiteSpace) <?> "return statement"
 
 bodyParser :: Parser Stmt
-bodyParser = try (BodyStmt <$> braces (many stmtParser) <* whiteSpace)
-        <|> try (BodyStmt <$> ((:[]) <$> stmtParser) <* whiteSpace) <?> "compound statement"
+bodyParser = BodyStmt <$> braces (manyTill (try stmtParser) (lookAhead (symbol "}")))
+        <|> (BodyStmt <$> ((:[]) <$> stmtParser)) <?> "compound statement"
 
 ifParser :: Parser Stmt
 ifParser = do {
@@ -141,6 +150,9 @@ whileParser = do {
     ex <- lookAhead (symbol "(") >> balancedP;
     WhileStmt pos (WildCard ex) <$> bodyParser;
 } <?> "while statement"
+
+goToParser :: Parser Stmt
+goToParser = do { pos <- pRsrvd "goto"; GotoStmt pos <$> identifier; }
 
 doWhileParser :: Parser Stmt
 doWhileParser = do {
@@ -182,18 +194,19 @@ forParser = do {
 } <?> "for statement"
 
 contParser :: Parser Stmt
-contParser = (reserved "continue" <* semi) >> return ContStmt <?> "continue statement"
+contParser = reserved "continue" <* semi >> return ContStmt <?> "continue statement"
 
 brkParser :: Parser Stmt
-brkParser = (reserved "break" <* semi) >> return BrkStmt <?> "break statement"
+brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
 
 fnDecParser :: Parser Stmt
 fnDecParser = do {
-    pos <- manyTill anyToken space >> getPosition <* whiteSpace;
+    pos <- skipMany (parseRsrvd ["typedef", "static"] <* whiteSpace) >> typeParser >> getPosition <* whiteSpace;
     name <- identifier <* whiteSpace;
     args <- lookAhead (symbol "(") >> balancedP;
     FnDecStmt pos name [WildCard args] <$> bodyParser;
 } <?> "function definition statement"
+
 
 atomTpParser :: Parser Type
 atomTpParser = (reserved "int" >> return Int)
@@ -205,7 +218,8 @@ atomTpParser = (reserved "int" >> return Int)
     <|> (reserved "string" >> return (Pointer Char))
     <|> strUnParser "struct"
     <|> strUnParser "union"
-    <|> try (UnknownType <$> identifier <* lookAhead identifier)
+    <|> (reserved "auto" >> return (UnknownType "auto"))
+    <|> try (UnknownType <$> identifier <* lookAhead (identifier <|> symbol "*"))
     <?> "Atomic Type"
 
 strUnParser :: String -> Parser Type
@@ -336,6 +350,7 @@ floatParser = do {
 
 term :: Parser Expr
 term = try atomParser
+    <|> try (parens atomParser)
     <|> parens exprParser'
 
 terOpParser :: Parser (Expr -> Expr)
@@ -429,12 +444,6 @@ opTable = [
         binary "|=" (Assign BitOrAssign) AssocRight]
     ]
 
-skipPrePros :: Parser Stmt
-skipPrePros = do {
-    reservedOp "#" >> skipMany1 (noneOf "\n\r") >> whiteSpace;
-    return PreProsStmt;
-}
-
 parseStmt :: String -> Stmt
 parseStmt str = case parse stmtParser "" str of
     Left err -> error $ show err
@@ -443,7 +452,7 @@ parseStmt str = case parse stmtParser "" str of
 parseFile :: String -> IO [Stmt]
 parseFile f = do {
     codes <- readFile f;
-    case parse (whiteSpace *> manyTill (try (parseWcStmt <$> stmtParser)) eof) "" codes of
+    case parse (whiteSpace >> manyTill (try (parseWcStmt <$> stmtParser)) eof) "" codes of
         Left e -> print e >> fail "failed to parse the source file"
         Right r -> return r
 }
@@ -496,11 +505,12 @@ anyTkn = whiteSpace >> lexeme (try (do {
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keySymbols)) -- reserved symbol
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keyWords)) -- reserved word
         <|> try (fmap show integer) -- integer
-        -- non-terminating when parsing " " caused by the next line 
-        <|> try (eof >> error "end of file")
+        <|> try (eof >> error "end of file") -- to avoid the infinite recursion caused by the next line
         <|> try (manyTill anyToken (lookAhead anyTkn)) -- last resort: any token
         )
-    where parseRsrvd tbl = case tbl of
+
+parseRsrvd :: [String] -> Parser String
+parseRsrvd tbl = case tbl of
             [] -> fail "not in table"
             (x:xs) -> try (string x) <|> parseRsrvd xs
 

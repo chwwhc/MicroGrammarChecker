@@ -3,7 +3,6 @@ module AST where
 import Text.Parsec
 
 type Identifier = String 
-type UnknownTok = (SourcePos, String)
 
 data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | WhileStmt SourcePos Expr Stmt
@@ -18,8 +17,8 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ReturnStmt Expr 
     | LineStmt [Expr]
     | BodyStmt [Stmt]
-    | UnknownStmt SourcePos (Maybe Stmt)
-    | PreProsStmt
+    | GotoStmt SourcePos Identifier
+    | OtherStmt
     deriving (Show)
 
 data Expr = WildCard [String]
@@ -45,7 +44,6 @@ data Type = Int
     | Void 
     | Pointer Type
     | Reference Type
-    | Array Type
     | Struct Identifier 
     | Union Identifier  
     | Const Type

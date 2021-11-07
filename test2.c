@@ -1,12 +1,8 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
 
-#include "wordlist.h"
+int main(int argc, char* argv[])
+{
+	char *delim = "\t\n,:;'\".?!#$-><(){}[]|\\/*&^%@!~+=_"; // These are our word delimiters.
 
-struct WordNode *addWord ( char* word , struct WordNode *wordListHead , int * outofmemory ){
-   
+
 
 }
-
-void printWordList ( struct WordNode *wordListHead ) ;
