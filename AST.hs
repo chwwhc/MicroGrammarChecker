@@ -56,7 +56,7 @@ data Val = IntVal Integer
     | CharVal Char 
     | StrVal String
     | ListVal [Expr]
-    | VoidVal 
+    | NullVal
     deriving (Show)
 
 data UnOpSym = Not 

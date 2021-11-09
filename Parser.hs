@@ -12,10 +12,11 @@ keyWords = [
         "auto", "break", "case", "char", "const", "if",
         "continue", "default", "do", "int", "long",
         "register", "return", "short", "signed", "static",
-        "struct", "switch", "typedef", "union",
+        "struct", "switch", "typedef", "union", "NULL",
         "unsigned", "void", "volatile", "while", "double",
         "else", "enum", "extern", "float", "for", "goto",
-        "String", "string", "bool", "boolean", "public"
+        "String", "string", "bool", "boolean", "public",
+        "inline"
             ]
 
 keySymbols :: [String]
@@ -65,10 +66,23 @@ reserved :: String -> Parser ()
 reserved = Token.reserved lexer
 float :: Parser Double
 float = Token.float lexer
-charLiteral :: Parser Char
+charLiteral :: Parser Char 
 charLiteral = Token.charLiteral lexer
-stringLiteral :: Parser String
-stringLiteral = Token.stringLiteral lexer
+escape :: Parser String 
+escape = do {
+    sl <- char '\\';
+    esch <- oneOf "\\\"0nrvtbf";
+    return [sl, esch];
+}
+nonEscape :: Parser Char
+nonEscape = noneOf "\\\"\0\n\r\v\t\b\f"
+singleStr :: Parser String 
+singleStr = fmap return nonEscape <|> escape
+stringLiteral :: Parser String 
+stringLiteral = do {
+    str <- char '"' *> many singleStr <* char '"';
+    return $ concat str;
+}
 
 parseWcStmt :: Stmt -> Stmt
 parseWcStmt stmt = case stmt of
@@ -107,9 +121,9 @@ stmtParser = skipPrePros
 
 skipNewType :: Parser Stmt 
 skipNewType = do {
-    (reserved "typedef" >> (reserved "struct" <|> reserved "union")) <|> reserved "struct" <|> reserved "union";
+    (reserved "typedef" >> (reserved "struct" <|> reserved "union" <|> reserved "enum")) <|> reserved "struct" <|> reserved "union" <|> reserved "enum";
     identifier >> lookAhead (symbol "{");
-    bodyParser >> skipTo ";";
+    balancedP "{" "}";
     return OtherStmt;
 } <?> "struct or union definition"
 
@@ -136,7 +150,7 @@ bodyParser = BodyStmt <$> braces (manyTill (try stmtParser) (lookAhead (symbol "
 ifParser :: Parser Stmt
 ifParser = do {
     pos <- pRsrvd "if";
-    cond <- lookAhead (symbol "(") >> balancedP;
+    cond <- lookAhead (symbol "(") >> balancedP "(" ")";
     trBr <- bodyParser;
     IfStmt pos (WildCard cond) trBr <$> optionMaybe elseParser;
 } <?> "if statement"
@@ -147,7 +161,7 @@ elseParser = reserved "else" >> (ifParser <|> bodyParser) <?> "optional else sta
 whileParser :: Parser Stmt
 whileParser = do {
     pos <- pRsrvd "while";
-    ex <- lookAhead (symbol "(") >> balancedP;
+    ex <- lookAhead (symbol "(") >> balancedP "(" ")";
     WhileStmt pos (WildCard ex) <$> bodyParser;
 } <?> "while statement"
 
@@ -158,31 +172,41 @@ doWhileParser :: Parser Stmt
 doWhileParser = do {
     pos <- pRsrvd "do";
     body <- bodyParser;
-    ex <- reserved "while" >> lookAhead (symbol "(") >> balancedP <* semi;
+    ex <- reserved "while" >> lookAhead (symbol "(") >> balancedP "(" ")" <* semi;
     return $ DoWhileStmt pos body (WildCard ex);
 } <?> "do-while statement"
 
 switchParser :: Parser Stmt
 switchParser = do {
     pos <- pRsrvd "switch";
-    ex <- lookAhead (symbol "(") >> balancedP;
+    ex <- lookAhead (symbol "(") >> balancedP "(" ")";
     SwitchStmt pos (WildCard ex) <$> bodyParser;
 } <?> "switch statement"
 
 caseParser :: Parser Stmt
-caseParser = do {
-    pos <- pRsrvd "case";
-    ex <- skipTo ":";
-    stmts <- manyTill stmtParser (lookAhead (caseParser <|> dfltParser));
-    return $ CaseStmt pos (WildCard ex) (BodyStmt stmts);
-} <?> "case statement"
+caseParser = try (do {
+                    pos <- pRsrvd "case";
+                    ex <- skipTo ":" <* whiteSpace;
+                    CaseStmt pos (WildCard ex) <$> bodyParser;
+                    }) 
+            <|> try (do {
+                    pos <- pRsrvd "case";
+                    ex <- skipTo ":";
+                    stmts <- manyTill stmtParser (lookAhead (caseParser <|> dfltParser));
+                    return $ CaseStmt pos (WildCard ex) (BodyStmt stmts);
+                    })
+    <?> "case statement"
 
 dfltParser :: Parser Stmt
-dfltParser = do {
-    pos <- pRsrvd "default" <* reservedOp ":";
-    stmts <- manyTill stmtParser (lookAhead (symbol "}"));
-    return $ DefaultStmt pos (BodyStmt stmts);
-} <?> "default statement"
+dfltParser = try (do {
+                    pos <- pRsrvd "default" <* reservedOp ":" <* whiteSpace;
+                    DefaultStmt pos <$> bodyParser;
+                    })
+            <|> try (do {
+                    pos <- pRsrvd "default" <* reservedOp ":";
+                    stmts <- manyTill stmtParser (lookAhead (symbol "}"));
+                    return $ DefaultStmt pos (BodyStmt stmts);
+                    })
 
 forParser :: Parser Stmt
 forParser = do {
@@ -201,9 +225,9 @@ brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
 
 fnDecParser :: Parser Stmt
 fnDecParser = do {
-    pos <- skipMany (parseRsrvd ["typedef", "static"] <* whiteSpace) >> typeParser >> getPosition <* whiteSpace;
+    pos <- skipMany (parseRsrvd ["typedef", "static", "inline"] <* whiteSpace) >> typeParser >> getPosition <* whiteSpace;
     name <- identifier <* whiteSpace;
-    args <- lookAhead (symbol "(") >> balancedP;
+    args <- lookAhead (symbol "(") >> balancedP "(" ")";
     FnDecStmt pos name [WildCard args] <$> bodyParser;
 } <?> "function definition statement"
 
@@ -296,7 +320,8 @@ fnCallParser = do {
 }
 
 atomParser :: Parser Expr
-atomParser = try floatParser
+atomParser = try nullParser
+    <|> try floatParser
     <|> try boolParser
     <|> try charParser
     <|> try strParser
@@ -311,6 +336,12 @@ lstValParser = do {
     pos <- getPosition;
     Atom pos . ListVal <$> braces (atomParser `sepBy` comma);
 }<?> "array"
+
+nullParser :: Parser Expr 
+nullParser = do {
+    pos <- getPosition <* reserved "NULL";
+    return $ Atom pos NullVal;
+}
 
 intParser :: Parser Expr
 intParser = do {
@@ -485,16 +516,12 @@ anyTkn = whiteSpace >> lexeme (try (do {
                 return $ rWrd ++ concat ptrs
                 }) -- pointer type
         <|> try (do{
-                l <- (:[]) <$> char '\"';
-                s <- manyTill anyChar (lookAhead $ char '\"');
-                r <- (:[]) <$> char '\"';
-                return $ l ++ s ++ r
+                str <- stringLiteral;
+                return $ "\"" ++ str ++ "\""
                 }) -- string literal
         <|> try (do{
-                l <- (:[]) <$> char '\'';
-                s <- manyTill anyChar (lookAhead $ char '\'');
-                r <- (:[]) <$> char '\'';
-                return $ l ++ s ++ r
+                ch <- charLiteral;
+                return $ "\'" ++ [ch] ++ "\'"
                 }) -- char literal
         <|> try (do {
                 neg <- symbol "-";
@@ -514,18 +541,18 @@ parseRsrvd tbl = case tbl of
             [] -> fail "not in table"
             (x:xs) -> try (string x) <|> parseRsrvd xs
 
-balancedP :: Parser [String]
-balancedP = whiteSpace *> balancedP' 0 0 [] <* whiteSpace
-    where balancedP' lcnt rcnt acc =
-            if lcnt == rcnt && lcnt /= 0 then
-                return $ (tail . init) acc
-            else
-                try (symbol "(" >> balancedP' (lcnt + 1) rcnt (acc ++ ["("]))
-                <|> try (symbol ")" >> balancedP' lcnt (rcnt + 1) (acc ++ [")"]))
-                <|> try (do {
-                    tk <- anyTkn;
-                    balancedP' lcnt rcnt (acc ++ [tk]);
-                })
-                <|> do {
-                    semi >> balancedP' lcnt rcnt (acc ++ [";"]);
-                }
+balancedP :: String -> String -> Parser [String]
+balancedP l r = whiteSpace *> balancedP' l r 0 0 [] <* whiteSpace
+            where balancedP' l r lcnt rcnt acc =
+                    if lcnt == rcnt && lcnt /= 0 then
+                        return $ (tail . init) acc
+                    else
+                        try (symbol l >> balancedP' l r (lcnt + 1) rcnt (acc ++ [l]))
+                        <|> try (symbol r >> balancedP' l r lcnt (rcnt + 1) (acc ++ [r]))
+                        <|> try (do {
+                            tk <- anyTkn;
+                            balancedP' l r lcnt rcnt (acc ++ [tk]);
+                        })
+                        <|> do {
+                            semi >> balancedP' l r lcnt rcnt (acc ++ [";"]);
+                        }
