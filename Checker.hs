@@ -5,5 +5,5 @@ import AST
 
 checkFor :: Stmt -> String
 checkFor stmt = case stmt of
-    ForStmt dec cond up body -> "s"
+    ForStmt pos dec cond up body -> "s"
     _ -> ""
