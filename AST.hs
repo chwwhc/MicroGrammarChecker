@@ -34,14 +34,26 @@ data Expr = WildCard [String]
     | Assign BinOpSym Expr Expr 
     | VarDec (Type, Expr)
     | VoidExpr SourcePos
+    | Empty
     deriving (Show)
 
 data Type = Int
+    | UnsignedInt
+    | Long
+    | LongLong 
+    | UnsignedLong 
+    | UnsignedLongLong
+    | Short 
+    | UnsignedShort 
     | Bool
     | Float 
     | Double
+    | LongDouble
     | Char
+    | UnsignedChar
     | Void 
+    | Auto 
+    | Array
     | Pointer Type
     | Reference Type
     | Struct Identifier 

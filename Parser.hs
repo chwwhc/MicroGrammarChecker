@@ -66,9 +66,9 @@ reserved :: String -> Parser ()
 reserved = Token.reserved lexer
 float :: Parser Double
 float = Token.float lexer
-charLiteral :: Parser Char 
+charLiteral :: Parser Char
 charLiteral = Token.charLiteral lexer
-escape :: Parser String 
+escape :: Parser String
 escape = do {
     sl <- char '\\';
     esch <- oneOf "\\\"0nrvtbf";
@@ -76,9 +76,9 @@ escape = do {
 }
 nonEscape :: Parser Char
 nonEscape = noneOf "\\\"\0\n\r\v\t\b\f"
-singleStr :: Parser String 
+singleStr :: Parser String
 singleStr = fmap return nonEscape <|> escape
-stringLiteral :: Parser String 
+stringLiteral :: Parser String
 stringLiteral = do {
     str <- char '"' *> many singleStr <* char '"';
     return $ concat str;
@@ -119,7 +119,7 @@ stmtParser = skipPrePros
     <|> lineParser
     <?> "any statement"
 
-skipNewType :: Parser Stmt 
+skipNewType :: Parser Stmt
 skipNewType = do {
     (reserved "typedef" >> (reserved "struct" <|> reserved "union" <|> reserved "enum")) <|> reserved "struct" <|> reserved "union" <|> reserved "enum";
     identifier >> lookAhead (symbol "{");
@@ -188,7 +188,7 @@ caseParser = try (do {
                     pos <- pRsrvd "case";
                     ex <- skipTo ":" <* whiteSpace;
                     CaseStmt pos (WildCard ex) <$> bodyParser;
-                    }) 
+                    })
             <|> try (do {
                     pos <- pRsrvd "case";
                     ex <- skipTo ":";
@@ -225,29 +225,37 @@ brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
 
 fnDecParser :: Parser Stmt
 fnDecParser = do {
-    pos <- skipMany (parseRsrvd ["typedef", "static", "inline"] <* whiteSpace) >> typeParser >> getPosition <* whiteSpace;
+    pos <- skipMany (parseRsrvd ["static", "inline"] <* whiteSpace) >> typeParser >> getPosition <* whiteSpace;
     name <- identifier <* whiteSpace;
     args <- lookAhead (symbol "(") >> balancedP "(" ")";
     FnDecStmt pos name [WildCard args] <$> bodyParser;
 } <?> "function definition statement"
 
-
 atomTpParser :: Parser Type
-atomTpParser = (reserved "int" >> return Int)
-    <|> (reserved "char" >> return Char)
-    <|> (reserved "float" >> return Float)
-    <|> (reserved "double" >> return Double)
-    <|> (choice [reserved "bool", reserved "boolean"] >> return Bool)
-    <|> (reserved "void" >> return Void)
-    <|> (reserved "string" >> return (Pointer Char))
-    <|> strUnParser "struct"
-    <|> strUnParser "union"
-    <|> (reserved "auto" >> return (UnknownType "auto"))
-    <|> try (UnknownType <$> identifier <* lookAhead (identifier <|> symbol "*"))
+atomTpParser = parseTpGroup LongLong ["long long int", "long long", "signed long long int", "signed long long"]
+    <|> parseTpGroup Long ["long int", "long", "signed long int", "signed long"]
+    <|> parseTpGroup UnsignedLongLong ["unsigned long long int", "unsigned long long"]
+    <|> parseTpGroup UnsignedLong  ["unsigned long int", "unsigned long"]
+    <|> parseTpGroup Short ["short int", "short", "signed short int", "signed short"]
+    <|> parseTpGroup UnsignedShort ["unsigned short int", "unsigned short"]
+    <|> parseTpGroup Int ["int", "signed int", "signed"]
+    <|> parseTpGroup UnsignedInt ["unsigned int", "unsigned"]
+    <|> parseTpGroup Bool ["bool"]
+    <|> parseTpGroup Float ["float"]
+    <|> parseTpGroup Double ["double"]
+    <|> parseTpGroup LongDouble ["long double"]
+    <|> parseTpGroup Char ["signed char", "char"]
+    <|> parseTpGroup UnsignedChar ["unsigned char"]
+    <|> parseTpGroup Void ["void"]
+    <|> parseTpGroup Auto ["auto"]
+    <|> choice (try . strUnParser <$> ["struct", "union"])
+    <|> UnknownType <$> identifier <* lookAhead (identifier <|> symbol "*")
     <?> "Atomic Type"
+    where parseTpGroup tp tbl = choice (try . string <$> tbl) >> return tp
 
 strUnParser :: String -> Parser Type
-strUnParser s = reserved s >> Struct <$> identifier;
+strUnParser s = if s == "struct" then reserved s >> Struct <$> identifier 
+                else reserved s >> Union <$> identifier
 
 ptrTpParser :: Parser (Type -> Type)
 ptrTpParser = do {
@@ -262,8 +270,8 @@ refTpParser = do {
 } <?> "reference"
 
 typeParser :: Parser Type
-typeParser = buildExpressionParser tpTbl atomTpParser <?> "type"
-    where tpTbl = [[prefix "const" Const,
+typeParser = buildExpressionParser speTpTbl (atomTpParser <* whiteSpace) <?> "type"
+    where speTpTbl = [[prefix "const" Const,
                     postfixChain ptrTpParser,
                     postfixChain refTpParser]]
 
@@ -293,8 +301,9 @@ varDecParser :: Type -> Parser Expr
 varDecParser tp = do { var <- exprParser'; return $ VarDec (tp, var); }
 
 exprParser' :: Parser Expr
-exprParser' = buildExpressionParser opTable term
-    <?> "expression"
+exprParser' = try (buildExpressionParser opTable term)
+            <|> return Empty
+            <?> "expression"
 
 identParser :: Parser Expr
 identParser = do {
@@ -335,26 +344,26 @@ lstValParser :: Parser Expr
 lstValParser = do {
     pos <- getPosition;
     Atom pos . ListVal <$> braces (atomParser `sepBy` comma);
-}<?> "array"
+} <?> "array"
 
-nullParser :: Parser Expr 
+nullParser :: Parser Expr
 nullParser = do {
     pos <- getPosition <* reserved "NULL";
     return $ Atom pos NullVal;
-}
+} <?> "NULL"
 
 intParser :: Parser Expr
 intParser = do {
     pos <- getPosition;
     Atom pos . IntVal <$> integer
-}<?> "integer"
+} <?> "integer"
 
 boolParser :: Parser Expr
 boolParser = do {
     pos <- getPosition;
     (reserved "true" >> return (Atom pos . BoolVal $ True))
     <|> (reserved "false" >> return (Atom pos . BoolVal $ False))
-}<?> "bool"
+} <?> "bool"
 
 charParser :: Parser Expr
 charParser = do {
@@ -377,7 +386,7 @@ floatParser = do {
         n <- float;
         return $ Atom pos $ FloatVal (-n);
     }
-}<?> "floating point number"
+} <?> "floating point number"
 
 term :: Parser Expr
 term = try atomParser
@@ -489,7 +498,7 @@ parseFile f = do {
 }
 
 skipTo :: String -> Parser [String]
-skipTo p = try (string p >> return [])
+skipTo p = try (whiteSpace >> string p >> return [])
         <|> (:) <$> anyTkn <*> skipTo p
 
 pRsrvd :: String -> Parser SourcePos
@@ -532,7 +541,7 @@ anyTkn = whiteSpace >> lexeme (try (do {
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keySymbols)) -- reserved symbol
         <|> try (parseRsrvd (sortBy (\e1 e2 -> compare (length e2) (length e1)) keyWords)) -- reserved word
         <|> try (fmap show integer) -- integer
-        <|> try (eof >> error "end of file") -- to avoid the infinite recursion caused by the next line
+        <|> try (eof >> string "") -- to avoid the infinite recursion caused by the next line
         <|> try (manyTill anyToken (lookAhead anyTkn)) -- last resort: any token
         )
 

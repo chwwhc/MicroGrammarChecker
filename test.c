@@ -1,177 +1,405 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- *  Copyright (C) 2004 IBM Corporation
+ * kernel/stacktrace.c
  *
- *  Author: Serge Hallyn <serue@us.ibm.com>
+ * Stack trace management functions
+ *
+ *  Copyright (C) 2006 Red Hat, Inc., Ingo Molnar <mingo@redhat.com>
  */
-
+#include <linux/sched/task_stack.h>
+#include <linux/sched/debug.h>
+#include <linux/sched.h>
+#include <linux/kernel.h>
 #include <linux/export.h>
-#include <linux/uts.h>
-#include <linux/utsname.h>
-#include <linux/err.h>
-#include <linux/slab.h>
-#include <linux/cred.h>
-#include <linux/user_namespace.h>
-#include <linux/proc_ns.h>
-#include <linux/sched/task.h>
+#include <linux/kallsyms.h>
+#include <linux/stacktrace.h>
+#include <linux/interrupt.h>
 
-static struct kmem_cache *uts_ns_cache __ro_after_init;
-
-static struct ucounts *inc_uts_namespaces(struct user_namespace *ns)
-{
-	return inc_ucount(ns, current_euid(), UCOUNT_UTS_NAMESPACES);
-}
-
-static void dec_uts_namespaces(struct ucounts *ucounts)
-{
-	dec_ucount(ucounts, UCOUNT_UTS_NAMESPACES);
-}
-
-static struct uts_namespace *create_uts_ns(void)
-{
-	struct uts_namespace *uts_ns;
-
-	uts_ns = kmem_cache_alloc(uts_ns_cache, GFP_KERNEL);
-	if (uts_ns)
-		refcount_set(&uts_ns->ns.count, 1);
-	return uts_ns;
-}
-
-/*
- * Clone a new ns copying an original utsname, setting refcount to 1
- * @old_ns: namespace to clone
- * Return ERR_PTR(-ENOMEM) on error (failure to allocate), new ns otherwise
+/**
+ * stack_trace_print - Print the entries in the stack trace
+ * @entries:	Pointer to storage array
+ * @nr_entries:	Number of entries in the storage array
+ * @spaces:	Number of leading spaces to print
  */
-static struct uts_namespace *clone_uts_ns(struct user_namespace *user_ns,
-					  struct uts_namespace *old_ns)
+void stack_trace_print(const unsigned long *entries, unsigned int nr_entries,
+		       int spaces)
 {
-	struct uts_namespace *ns;
-	struct ucounts *ucounts;
-	int err;
+	unsigned int i;
 
-	err = -ENOSPC;
-	ucounts = inc_uts_namespaces(user_ns);
-	if (!ucounts)
-		goto fail;
+	if (WARN_ON(!entries))
+		return;
 
-	err = -ENOMEM;
-	ns = create_uts_ns();
-	if (!ns)
-		goto fail_dec;
-
-	err = ns_alloc_inum(&ns->ns);
-	if (err)
-		goto fail_free;
-
-	ns->ucounts = ucounts;
-	ns->ns.ops = &utsns_operations;
-
-	down_read(&uts_sem);
-	memcpy(&ns->name, &old_ns->name, sizeof(ns->name));
-	ns->user_ns = get_user_ns(user_ns);
-	up_read(&uts_sem);
-	return ns;
-
-fail_free:
-	kmem_cache_free(uts_ns_cache, ns);
-fail_dec:
-	dec_uts_namespaces(ucounts);
-fail:
-	return ERR_PTR(err);
+	for (i = 0; i < nr_entries; i++)
+		printk("%*c%pS\n", 1 + spaces, ' ', (void *)entries[i]);
 }
+EXPORT_SYMBOL_GPL(stack_trace_print);
 
-/*
- * Copy task tsk's utsname namespace, or clone it if flags
- * specifies CLONE_NEWUTS.  In latter case, changes to the
- * utsname of this process won't be seen by parent, and vice
- * versa.
+/**
+ * stack_trace_snprint - Print the entries in the stack trace into a buffer
+ * @buf:	Pointer to the print buffer
+ * @size:	Size of the print buffer
+ * @entries:	Pointer to storage array
+ * @nr_entries:	Number of entries in the storage array
+ * @spaces:	Number of leading spaces to print
+ *
+ * Return: Number of bytes printed.
  */
-struct uts_namespace *copy_utsname(unsigned long flags,
-	struct user_namespace *user_ns, struct uts_namespace *old_ns)
+int stack_trace_snprint(char *buf, size_t size, const unsigned long *entries,
+			unsigned int nr_entries, int spaces)
 {
-	struct uts_namespace *new_ns;
+	unsigned int generated, i, total = 0;
 
-	BUG_ON(!old_ns);
-	get_uts_ns(old_ns);
+	if (WARN_ON(!entries))
+		return 0;
 
-	if (!(flags & CLONE_NEWUTS))
-		return old_ns;
+	for (i = 0; i < nr_entries && size; i++) {
+		generated = snprintf(buf, size, "%*c%pS\n", 1 + spaces, ' ',
+				     (void *)entries[i]);
 
-	new_ns = clone_uts_ns(user_ns, old_ns);
-
-	put_uts_ns(old_ns);
-	return new_ns;
-}
-
-void free_uts_ns(struct uts_namespace *ns)
-{
-	dec_uts_namespaces(ns->ucounts);
-	put_user_ns(ns->user_ns);
-	ns_free_inum(&ns->ns);
-	kmem_cache_free(uts_ns_cache, ns);
-}
-
-static inline struct uts_namespace *to_uts_ns(struct ns_common *ns)
-{
-	return container_of(ns, struct uts_namespace, ns);
-}
-
-static struct ns_common *utsns_get(struct task_struct *task)
-{
-	struct uts_namespace *ns = NULL;
-	struct nsproxy *nsproxy;
-
-	task_lock(task);
-	nsproxy = task->nsproxy;
-	if (nsproxy) {
-		ns = nsproxy->uts_ns;
-		get_uts_ns(ns);
+		total += generated;
+		if (generated >= size) {
+			buf += size;
+			size = 0;
+		} else {
+			buf += generated;
+			size -= generated;
+		}
 	}
-	task_unlock(task);
 
-	return ns ? &ns->ns : NULL;
+	return total;
 }
+EXPORT_SYMBOL_GPL(stack_trace_snprint);
 
-static void utsns_put(struct ns_common *ns)
-{
-	put_uts_ns(to_uts_ns(ns));
-}
+#ifdef CONFIG_ARCH_STACKWALK
 
-static int utsns_install(struct nsset *nsset, struct ns_common *new)
-{
-	struct nsproxy *nsproxy = nsset->nsproxy;
-	struct uts_namespace *ns = to_uts_ns(new);
-
-	if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN) ||
-	    !ns_capable(nsset->cred->user_ns, CAP_SYS_ADMIN))
-		return -EPERM;
-
-	get_uts_ns(ns);
-	put_uts_ns(nsproxy->uts_ns);
-	nsproxy->uts_ns = ns;
-	return 0;
-}
-
-static struct user_namespace *utsns_owner(struct ns_common *ns)
-{
-	return to_uts_ns(ns)->user_ns;
-}
-
-const struct proc_ns_operations utsns_operations = {
-	.name		= "uts",
-	.type		= CLONE_NEWUTS,
-	.get		= utsns_get,
-	.put		= utsns_put,
-	.install	= utsns_install,
-	.owner		= utsns_owner,
+struct stacktrace_cookie {
+	unsigned long	*store;
+	unsigned int	size;
+	unsigned int	skip;
+	unsigned int	len;
 };
 
-void __init uts_ns_init(void)
+static bool stack_trace_consume_entry(void *cookie, unsigned long addr)
 {
-	uts_ns_cache = kmem_cache_create_usercopy(
-			"uts_namespace", sizeof(struct uts_namespace), 0,
-			SLAB_PANIC|SLAB_ACCOUNT,
-			offsetof(struct uts_namespace, name),
-			sizeof_field(struct uts_namespace, name),
-			NULL);
+	struct stacktrace_cookie *c = cookie;
+
+	if (c->len >= c->size)
+		return false;
+
+	if (c->skip > 0) {
+		c->skip--;
+		return true;
+	}
+	c->store[c->len++] = addr;
+	return c->len < c->size;
 }
+
+static bool stack_trace_consume_entry_nosched(void *cookie, unsigned long addr)
+{
+	if (in_sched_functions(addr))
+		return true;
+	return stack_trace_consume_entry(cookie, addr);
+}
+
+/**
+ * stack_trace_save - Save a stack trace into a storage array
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored.
+ */
+unsigned int stack_trace_save(unsigned long *store, unsigned int size,
+			      unsigned int skipnr)
+{
+	stack_trace_consume_fn consume_entry = stack_trace_consume_entry;
+	struct stacktrace_cookie c = {
+		.store	= store,
+		.size	= size,
+		.skip	= skipnr + 1,
+	};
+
+	arch_stack_walk(consume_entry, &c, current, NULL);
+	return c.len;
+}
+EXPORT_SYMBOL_GPL(stack_trace_save);
+
+/**
+ * stack_trace_save_tsk - Save a task stack trace into a storage array
+ * @task:	The task to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored.
+ */
+unsigned int stack_trace_save_tsk(struct task_struct *tsk, unsigned long *store,
+				  unsigned int size, unsigned int skipnr)
+{
+	stack_trace_consume_fn consume_entry = stack_trace_consume_entry_nosched;
+	struct stacktrace_cookie c = {
+		.store	= store,
+		.size	= size,
+		/* skip this function if they are tracing us */
+		.skip	= skipnr + (current == tsk),
+	};
+
+	if (!try_get_task_stack(tsk))
+		return 0;
+
+	arch_stack_walk(consume_entry, &c, tsk, NULL);
+	put_task_stack(tsk);
+	return c.len;
+}
+
+/**
+ * stack_trace_save_regs - Save a stack trace based on pt_regs into a storage array
+ * @regs:	Pointer to pt_regs to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored.
+ */
+unsigned int stack_trace_save_regs(struct pt_regs *regs, unsigned long *store,
+				   unsigned int size, unsigned int skipnr)
+{
+	stack_trace_consume_fn consume_entry = stack_trace_consume_entry;
+	struct stacktrace_cookie c = {
+		.store	= store,
+		.size	= size,
+		.skip	= skipnr,
+	};
+
+	arch_stack_walk(consume_entry, &c, current, regs);
+	return c.len;
+}
+
+#ifdef CONFIG_HAVE_RELIABLE_STACKTRACE
+/**
+ * stack_trace_save_tsk_reliable - Save task stack with verification
+ * @tsk:	Pointer to the task to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ *
+ * Return:	An error if it detects any unreliable features of the
+ *		stack. Otherwise it guarantees that the stack trace is
+ *		reliable and returns the number of entries stored.
+ *
+ * If the task is not 'current', the caller *must* ensure the task is inactive.
+ */
+int stack_trace_save_tsk_reliable(struct task_struct *tsk, unsigned long *store,
+				  unsigned int size)
+{
+	stack_trace_consume_fn consume_entry = stack_trace_consume_entry;
+	struct stacktrace_cookie c = {
+		.store	= store,
+		.size	= size,
+	};
+	int ret;
+
+	/*
+	 * If the task doesn't have a stack (e.g., a zombie), the stack is
+	 * "reliably" empty.
+	 */
+	if (!try_get_task_stack(tsk))
+		return 0;
+
+	ret = arch_stack_walk_reliable(consume_entry, &c, tsk);
+	put_task_stack(tsk);
+	return ret ? ret : c.len;
+}
+#endif
+
+#ifdef CONFIG_USER_STACKTRACE_SUPPORT
+/**
+ * stack_trace_save_user - Save a user space stack trace into a storage array
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ *
+ * Return: Number of trace entries stored.
+ */
+unsigned int stack_trace_save_user(unsigned long *store, unsigned int size)
+{
+	stack_trace_consume_fn consume_entry = stack_trace_consume_entry;
+	struct stacktrace_cookie c = {
+		.store	= store,
+		.size	= size,
+	};
+	mm_segment_t fs;
+
+	/* Trace user stack if not a kernel thread */
+	if (current->flags & PF_KTHREAD)
+		return 0;
+
+	fs = force_uaccess_begin();
+	arch_stack_walk_user(consume_entry, &c, task_pt_regs(current));
+	force_uaccess_end(fs);
+
+	return c.len;
+}
+#endif
+
+#else /* CONFIG_ARCH_STACKWALK */
+
+/*
+ * Architectures that do not implement save_stack_trace_*()
+ * get these weak aliases and once-per-bootup warnings
+ * (whenever this facility is utilized - for example by procfs):
+ */
+__weak void
+save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
+{
+	WARN_ONCE(1, KERN_INFO "save_stack_trace_tsk() not implemented yet.\n");
+}
+
+__weak void
+save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
+{
+	WARN_ONCE(1, KERN_INFO "save_stack_trace_regs() not implemented yet.\n");
+}
+
+/**
+ * stack_trace_save - Save a stack trace into a storage array
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored
+ */
+unsigned int stack_trace_save(unsigned long *store, unsigned int size,
+			      unsigned int skipnr)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+		.skip		= skipnr + 1,
+	};
+
+	save_stack_trace(&trace);
+	return trace.nr_entries;
+}
+EXPORT_SYMBOL_GPL(stack_trace_save);
+
+/**
+ * stack_trace_save_tsk - Save a task stack trace into a storage array
+ * @task:	The task to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored
+ */
+unsigned int stack_trace_save_tsk(struct task_struct *task,
+				  unsigned long *store, unsigned int size,
+				  unsigned int skipnr)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+		/* skip this function if they are tracing us */
+		.skip	= skipnr + (current == task),
+	};
+
+	save_stack_trace_tsk(task, &trace);
+	return trace.nr_entries;
+}
+
+/**
+ * stack_trace_save_regs - Save a stack trace based on pt_regs into a storage array
+ * @regs:	Pointer to pt_regs to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ * @skipnr:	Number of entries to skip at the start of the stack trace
+ *
+ * Return: Number of trace entries stored
+ */
+unsigned int stack_trace_save_regs(struct pt_regs *regs, unsigned long *store,
+				   unsigned int size, unsigned int skipnr)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+		.skip		= skipnr,
+	};
+
+	save_stack_trace_regs(regs, &trace);
+	return trace.nr_entries;
+}
+
+#ifdef CONFIG_HAVE_RELIABLE_STACKTRACE
+/**
+ * stack_trace_save_tsk_reliable - Save task stack with verification
+ * @tsk:	Pointer to the task to examine
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ *
+ * Return:	An error if it detects any unreliable features of the
+ *		stack. Otherwise it guarantees that the stack trace is
+ *		reliable and returns the number of entries stored.
+ *
+ * If the task is not 'current', the caller *must* ensure the task is inactive.
+ */
+int stack_trace_save_tsk_reliable(struct task_struct *tsk, unsigned long *store,
+				  unsigned int size)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+	};
+	int ret = save_stack_trace_tsk_reliable(tsk, &trace);
+
+	return ret ? ret : trace.nr_entries;
+}
+#endif
+
+#ifdef CONFIG_USER_STACKTRACE_SUPPORT
+/**
+ * stack_trace_save_user - Save a user space stack trace into a storage array
+ * @store:	Pointer to storage array
+ * @size:	Size of the storage array
+ *
+ * Return: Number of trace entries stored
+ */
+unsigned int stack_trace_save_user(unsigned long *store, unsigned int size)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+	};
+
+	save_stack_trace_user(&trace);
+	return trace.nr_entries;
+}
+#endif /* CONFIG_USER_STACKTRACE_SUPPORT */
+
+#endif /* !CONFIG_ARCH_STACKWALK */
+
+static inline bool in_irqentry_text(unsigned long ptr)
+{
+	return (ptr >= (unsigned long)&__irqentry_text_start &&
+		ptr < (unsigned long)&__irqentry_text_end) ||
+		(ptr >= (unsigned long)&__softirqentry_text_start &&
+		 ptr < (unsigned long)&__softirqentry_text_end);
+}
+
+/**
+ * filter_irq_stacks - Find first IRQ stack entry in trace
+ * @entries:	Pointer to stack trace array
+ * @nr_entries:	Number of entries in the storage array
+ *
+ * Return: Number of trace entries until IRQ stack starts.
+ */
+unsigned int filter_irq_stacks(unsigned long *entries, unsigned int nr_entries)
+{
+	unsigned int i;
+
+	for (i = 0; i < nr_entries; i++) {
+		if (in_irqentry_text(entries[i])) {
+			/* Include the irqentry function into the stack. */
+			return i + 1;
+		}
+	}
+	return nr_entries;
+}
+EXPORT_SYMBOL_GPL(filter_irq_stacks);
