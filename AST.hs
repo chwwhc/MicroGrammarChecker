@@ -34,7 +34,6 @@ data Expr = WildCard [String]
     | Assign BinOpSym Expr Expr 
     | VarDec (Type, Expr)
     | VoidExpr SourcePos
-    | Empty
     deriving (Show)
 
 data Type = Int
