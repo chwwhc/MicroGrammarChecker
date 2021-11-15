@@ -1,4 +1,4 @@
-import Parser
+import CParser
 import AST
 
 -- Use (fmap . fmap)
@@ -16,6 +16,15 @@ checkFor stmt = case stmt of
     IfStmt pos cond trBr (Just elBr) -> checkFor trBr ++ "\n" ++ checkFor elBr
     ForStmt pos dec cond up body -> "s"
     _ -> ""
+
+redundBranch :: Stmt -> String 
+redundBranch stmt = case stmt of 
+    BodyStmt body -> unwords $ redundBranch <$> body 
+    FnDecStmt _ _ _ body -> redundBranch body 
+    WhileStmt _ _ body -> redundBranch body
+    DoWhileStmt _ body _ -> redundBranch body
+    SwitchStmt _ _ body -> redundBranch body
+    CaseStmt pos ex body
 
 check :: (Stmt -> String) -> String -> IO String
 check checker file = fmap (unlines . fmap checker) (parseFile file)

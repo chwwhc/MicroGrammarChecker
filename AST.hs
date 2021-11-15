@@ -10,6 +10,7 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ForStmt SourcePos Expr Expr Expr Stmt 
     | ContStmt 
     | BrkStmt 
+    | LabelStmt Identifier
     | SwitchStmt SourcePos Expr Stmt 
     | CaseStmt SourcePos Expr Stmt
     | DefaultStmt SourcePos Stmt
@@ -57,6 +58,7 @@ data Type = Int
     | Reference Type
     | Struct Identifier 
     | Union Identifier  
+    | Enum Identifier
     | Const Type
     | UnknownType Identifier
     deriving (Show)
