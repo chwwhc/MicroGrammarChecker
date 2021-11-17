@@ -11,7 +11,7 @@ checkFor stmt = case stmt of
     DoWhileStmt pos stmts ex -> checkFor stmts
     SwitchStmt pos ex stmts -> checkFor stmts
     CaseStmt pos ex stmts -> checkFor stmts
-    DefaultStmt pos stmts -> checkFor stmts
+    DfltStmt pos stmts -> checkFor stmts
     IfStmt pos cond trBr Nothing -> checkFor trBr
     IfStmt pos cond trBr (Just elBr) -> checkFor trBr ++ "\n" ++ checkFor elBr
     ForStmt pos dec cond up body -> "s"
@@ -19,12 +19,17 @@ checkFor stmt = case stmt of
 
 redundBranch :: Stmt -> String 
 redundBranch stmt = case stmt of 
-    BodyStmt body -> unwords $ redundBranch <$> body 
+    IfStmt pos cond trBr (Just elBr) -> if trBr == elBr then "redundant branches in the \"if\" statement at " ++ show pos else ""
+    WhileStmt _ _ body -> redundBranch body 
+    DoWhileStmt _ body _ -> redundBranch body 
+    ForStmt _ _ _ _ body -> redundBranch body 
+    SwitchStmt _ _ body -> redundBranch body 
+    CaseStmt _ _ body -> redundBranch body 
+    DfltStmt _ body -> redundBranch body 
     FnDecStmt _ _ _ body -> redundBranch body 
-    WhileStmt _ _ body -> redundBranch body
-    DoWhileStmt _ body _ -> redundBranch body
-    SwitchStmt _ _ body -> redundBranch body
-    CaseStmt pos ex body
+    BodyStmt stmts -> unwords $ redundBranch <$> stmts
+    _ -> ""
+
 
 check :: (Stmt -> String) -> String -> IO String
 check checker file = fmap (unlines . fmap checker) (parseFile file)

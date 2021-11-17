@@ -16,7 +16,7 @@ keyWords = [
         "unsigned", "void", "volatile", "while", "double",
         "else", "enum", "extern", "float", "for", "goto",
         "String", "string", "bool", "boolean", "public",
-        "inline", "size_t"
+        "inline", "size_t", "sizeof"
             ]
 
 keySymbols :: [String]
@@ -27,7 +27,7 @@ keySymbols = [
     "|", ".", "?", "==", ">>", "<<", "'", "\"",
     ":", "->", "[]", "+=", "-=", "*=", "/=", ";",
     "%=", "&=", "|=", "^=", ">>=", "<<=", "sizeof",
-    "--", "++"
+    "--", "++", "\\"
         ]
 
 languageDef = javaStyle {
@@ -58,6 +58,8 @@ parens :: Parser a -> Parser a
 parens = Token.parens lexer
 braces :: Parser a -> Parser a
 braces = Token.braces lexer
+angles :: Parser a -> Parser a
+angles = Token.angles lexer
 brackets :: Parser a -> Parser a
 brackets = Token.brackets lexer
 reserved :: String -> Parser ()
@@ -90,15 +92,16 @@ parseWcStmt stmt = case stmt of
     ForStmt pos dec cond upd st -> ForStmt pos (head $ parseExpr [dec]) (head (parseExpr [cond])) (head (parseExpr [upd])) (parseWcStmt st)
     SwitchStmt pos ex st -> SwitchStmt pos (head (parseExpr [ex])) (parseWcStmt st)
     CaseStmt pos ex st -> CaseStmt pos (head (parseExpr [ex])) (parseWcStmt st)
-    DefaultStmt pos st -> DefaultStmt pos (parseWcStmt st)
+    DfltStmt pos st -> DfltStmt pos (parseWcStmt st)
     FnDecStmt pos name ex_lst st -> FnDecStmt pos name (parseExpr ex_lst) (parseWcStmt st)
     ReturnStmt ex -> ReturnStmt (head (parseExpr [ex]))
     LineStmt ex -> LineStmt (parseExpr ex)
+    GotoStmt lab -> GotoStmt lab
     BodyStmt st_lst -> BodyStmt (parseWcStmt <$> st_lst)
     other -> other
 
 stmtParser :: Parser Stmt
-stmtParser = skipPrePros
+stmtParser = try skipPrePros
     <|> try fnDecParser
     <|> try skipNewType
     <|> goToParser
@@ -113,22 +116,28 @@ stmtParser = skipPrePros
     <|> contParser
     <|> brkParser
     <|> doWhileParser
-    <|> lineParser
+    <|> lineParser 
     <?> "any statement"
 
 skipNewType :: Parser Stmt
 skipNewType = typeParser >> (lookAhead (symbol "{") >> balancedP "{" "}") >> lineParser >> return OtherStmt <?> "struct or union definition"
 
 skipPrePros :: Parser Stmt
-skipPrePros = try (symbol "#" >> skipMany1 (noneOf "{") >> balancedP "{" "}" >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt)
-            <|> (symbol "#" >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt) 
-            <?> "preprocessors"
+skipPrePros = symbol "#" >>
+            (try (pRsrvd "define" >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt)
+            {--(pRsrvd "define" >> ((identifier >> notFollowedBy (symbol "(")) <|> (identifier >> void (balancedP "(" ")")))
+                >> (try (void atomParser) <|> void (skipMany (noneOf "{(") >> ((lookAhead (symbol "(") >> balancedP "(" ")") <|> (lookAhead (symbol "{") >> balancedP "{" "}"))))
+                >> (try (reserved "while" >> skipMany1 (alphaNum <|> oneOf "() ") >> whiteSpace >> return OtherStmt) <|> return OtherStmt))--}
+            <|> (pRsrvdTbl ["error", "pragma"] >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt)
+            <|> (pRsrvd "include" >> (try (angles (many1 (noneOf ">")) >> return OtherStmt) <|> try (stringLiteral >> whiteSpace >> return OtherStmt)))
+            <|> (pRsrvdTbl ["if", "ifdef", "ifndef"] >> skipTo "#endif" >> return OtherStmt)
+            <|> (pRsrvd "undef" >> atomParser >> return OtherStmt))
 
 lineParser :: Parser Stmt
-lineParser = whiteSpace >> lookAhead (noneOf "{}") >> (LineStmt . (:[])) . WildCard <$> skipTo ";" <* whiteSpace <?> "line"
+lineParser = whiteSpace >> lookAhead (noneOf "{}") >> ((LineStmt . (:[])) . WildCard <$> skipTo ";") <?> "line"
 
 returnParser :: Parser Stmt
-returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";" <* whiteSpace) <?> "return statement"
+returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";") <?> "return statement"
 
 bodyParser :: Parser Stmt
 bodyParser = BodyStmt <$> braces (manyTill stmtParser (lookAhead (symbol "}")))
@@ -144,7 +153,7 @@ whileParser :: Parser Stmt
 whileParser = WhileStmt <$> pRsrvd "while" <*> (WildCard <$> balancedP "(" ")") <*> bodyParser <?> "while statement"
 
 goToParser :: Parser Stmt
-goToParser = GotoStmt <$> pRsrvd "goto" <*> identifier <?> "goto statement"
+goToParser = GotoStmt <$> (pRsrvd "goto" >> identifier) <?> "goto statement"
 
 doWhileParser :: Parser Stmt
 doWhileParser = DoWhileStmt <$> pRsrvd "do" <*> bodyParser <*> (WildCard <$> (reserved "while" >> balancedP "(" ")" <* semi)) <?> "do-while statement"
@@ -153,14 +162,14 @@ switchParser :: Parser Stmt
 switchParser = SwitchStmt <$> pRsrvd "switch" <*> (WildCard <$> balancedP "(" ")") <*> bodyParser <?> "switch statement"
 
 caseParser :: Parser Stmt
-caseParser = try (CaseStmt <$> pRsrvd "case" <*> (WildCard <$> skipTo ":" <* whiteSpace) <*> bodyParser)
-            <|> try ( CaseStmt <$> pRsrvd "case" <*> (WildCard <$> skipTo ":" <* whiteSpace) <*>
+caseParser = try (CaseStmt <$> pRsrvd "case" <*> (WildCard <$> skipTo ":") <*> bodyParser)
+            <|> try ( CaseStmt <$> pRsrvd "case" <*> (WildCard <$> skipTo ":") <*>
             (BodyStmt <$> manyTill stmtParser (lookAhead (caseParser <|> dfltParser))))
             <?> "case statement"
 
 dfltParser :: Parser Stmt
-dfltParser = try (DefaultStmt <$> pRsrvd "default" <* symbol ":" <* whiteSpace <*> bodyParser)
-            <|> try (DefaultStmt <$> pRsrvd "default" <* symbol ":" <* whiteSpace <*>
+dfltParser = try (DfltStmt <$> pRsrvd "default" <* symbol ":" <*> bodyParser)
+            <|> try (DfltStmt <$> pRsrvd "default" <* symbol ":" <*>
             (BodyStmt <$> manyTill stmtParser (lookAhead (symbol "}"))))
             <?> "default statement"
 
@@ -169,7 +178,7 @@ forParser = do {
     pos <- pRsrvd "for" <* symbol "(";
     varDec <- skipTo ";";
     endCond <- skipTo ";";
-    varUpdate <- skipTo ")" <* whiteSpace;
+    varUpdate <- skipTo ")";
     ForStmt pos (WildCard varDec) (WildCard endCond) (WildCard varUpdate) <$> bodyParser;
 } <?> "for statement"
 
@@ -177,7 +186,7 @@ labelParser :: Parser Stmt
 labelParser = LabelStmt <$> (identifier <* symbol ":")
 
 contParser :: Parser Stmt
-contParser = reserved "continue" <* semi >> return ContStmt <?> "continue statement"
+contParser = reserved "continue" <* semi >> return CntStmt <?> "continue statement"
 
 brkParser :: Parser Stmt
 brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
@@ -185,27 +194,27 @@ brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
 fnDecParser :: Parser Stmt
 fnDecParser = do {
     pos <- typeParser >> getPosition <* whiteSpace;
-    name <- identifier <* whiteSpace;
+    name <- identifier;
     args <- lookAhead (symbol "(") >> balancedP "(" ")";
     try (symbol ";" >> return (FnDecStmt pos name [WildCard args] (BodyStmt [])))
     <|> FnDecStmt pos name [WildCard args] <$> bodyParser;
 } <?> "function definition statement"
 
 atomTpParser :: Parser Type
-atomTpParser = parseTpGroup LongLong ["long long int", "long long", "signed long long int", "signed long long"]
-    <|> parseTpGroup Long ["long int", "long", "signed long int", "signed long"]
-    <|> parseTpGroup UnsignedLongLong ["unsigned long long int", "unsigned long long"]
-    <|> parseTpGroup UnsignedLong  ["unsigned long int", "unsigned long"]
-    <|> parseTpGroup Short ["short int", "short", "signed short int", "signed short"]
-    <|> parseTpGroup UnsignedShort ["unsigned short int", "unsigned short"]
+atomTpParser = parseTpGroup LongLong ["long long int", "long long", "signed long long int", "signed long long", "intmax_t"]
+    <|> parseTpGroup Long ["long int", "long", "signed long int", "signed long", "int_least64_t", "int_fast64_t", "int64_t"]
+    <|> parseTpGroup UnsignedLongLong ["unsigned long long int", "unsigned long long", "uintmax_t"]
+    <|> parseTpGroup UnsignedLong  ["unsigned long int", "unsigned long", "uint_least64_t", "uint_fast64_t", "uint64_t"]
+    <|> parseTpGroup Short ["short int", "short", "signed short int", "signed short", "int_least8_t", "int_fast8_t", "int8_t"]
+    <|> parseTpGroup UnsignedShort ["unsigned short int", "unsigned short", "uint_least8_t", "uint_fast8_t", "uint8_t"]
     <|> parseTpGroup Char ["signed char", "char"]
-    <|> parseTpGroup Int ["int", "signed int", "signed", "size_t"]
-    <|> parseTpGroup UnsignedInt ["unsigned int", "unsigned"]
+    <|> parseTpGroup UnsignedChar ["unsigned char"]
+    <|> parseTpGroup Int ["signed int", "signed", "size_t", "int32_t", "int_least16_t", "int_least32_t", "int_fast16_t", "int_fast32_t", "int16_t", "intptr_t", "int"]
+    <|> parseTpGroup UnsignedInt ["unsigned int", "unsigned", "uint_least16_t", "uint_least32_t", "uint_fast16_t", "uint_fast32_t", "uint16_t", "uint32_t", "uintptr_t"]
     <|> parseTpGroup Bool ["bool"]
     <|> parseTpGroup Float ["float"]
     <|> parseTpGroup Double ["double"]
     <|> parseTpGroup LongDouble ["long double"]
-    <|> parseTpGroup UnsignedChar ["unsigned char"]
     <|> parseTpGroup Void ["void"]
     <|> parseTpGroup Auto ["auto"]
     <|> choice (try . strUnEnParser <$> ["struct", "union", "enum"])
@@ -250,7 +259,7 @@ varDecParser :: Type -> Parser Expr
 varDecParser tp = do { var <- exprParser'; return $ VarDec (tp, var); } <?> "variable declaration"
 
 exprParser' :: Parser Expr
-exprParser' = buildExpressionParser opTable term <|> VoidExpr <$> getPosition
+exprParser' = whiteSpace *> (buildExpressionParser opTable term <|> VoidExpr <$> getPosition) <* whiteSpace
             <?> "expression"
 
 identParser :: Parser Expr
@@ -266,7 +275,7 @@ fnCallParser = do {
 }
 
 atomParser :: Parser Expr
-atomParser = try nullParser
+atomParser = lexeme (try nullParser
     <|> try floatParser
     <|> try boolParser
     <|> try intParser
@@ -275,6 +284,7 @@ atomParser = try nullParser
     <|> try identParser
     <|> try charParser
     <|> try strParser
+    <|> sizeOfParser )
     <?> "constant"
 
 lstValParser :: Parser Expr
@@ -305,6 +315,9 @@ floatParser = do {
     <|> do { symbol "-"; n <- float; return $ Atom pos $ FloatVal (-n); }
 } <?> "floating point number"
 
+sizeOfParser :: Parser Expr
+sizeOfParser = SizeOf <$> (reserved "sizeof" >> parens typeParser) <?> "sizeof"
+
 term :: Parser Expr
 term = try $ parens exprParser' <|> atomParser
 
@@ -331,6 +344,7 @@ tpCastParser = do {
 } <?> "type casting"
 
 binary name fun = Infix (reservedOp name >> return fun)
+binary' :: String -> (SourcePos -> a -> a -> a) -> Assoc -> Operator Char () a
 binary' name fun = Infix (do { pos <- getPosition; reservedOp name; return (fun pos)})
 prefix name fun = Prefix (reservedOp name >> return fun)
 postfix name fun = Postfix (reservedOp name >> return fun)
@@ -352,8 +366,7 @@ opTable = [
         prefix "!" (UnaOp Not),
         prefix "~" (UnaOp BitNeg),
         prefix "*" (UnaOp DeRef),
-        prefix "&" (UnaOp Addr),
-        prefix "sizeof" (UnaOp SizeOf)],
+        prefix "&" (UnaOp Addr)],
 
         [binary "*" (BinOp Mul) AssocLeft,
         binary "/" (BinOp Div) AssocLeft,
@@ -400,7 +413,7 @@ opTable = [
 
 skipTo :: String -> Parser [String]
 skipTo p = try (eof >> error  ("cannot skip to " ++ p))
-        <|> try (whiteSpace >> string p  <* whiteSpace >> return [])
+        <|> try (whiteSpace *> string p  <* whiteSpace >> return [])
         <|> (:) <$> anyTkn <*> skipTo p
 
 pRsrvd :: String -> Parser SourcePos
