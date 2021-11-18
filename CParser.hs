@@ -16,7 +16,7 @@ keyWords = [
         "unsigned", "void", "volatile", "while", "double",
         "else", "enum", "extern", "float", "for", "goto",
         "String", "string", "bool", "boolean", "public",
-        "inline", "size_t", "sizeof"
+        "inline", "size_t", "sizeof", "true", "false"
             ]
 
 keySymbols :: [String]
@@ -94,9 +94,9 @@ parseWcStmt stmt = case stmt of
     CaseStmt pos ex st -> CaseStmt pos (head (parseExpr [ex])) (parseWcStmt st)
     DfltStmt pos st -> DfltStmt pos (parseWcStmt st)
     FnDecStmt pos name ex_lst st -> FnDecStmt pos name (parseExpr ex_lst) (parseWcStmt st)
-    ReturnStmt ex -> ReturnStmt (head (parseExpr [ex]))
-    LineStmt ex -> LineStmt (parseExpr ex)
-    GotoStmt lab -> GotoStmt lab
+    ReturnStmt pos ex -> ReturnStmt pos (head (parseExpr [ex]))
+    LineStmt pos ex -> LineStmt pos (parseExpr ex)
+    GotoStmt pos lab -> GotoStmt pos lab
     BodyStmt st_lst -> BodyStmt (parseWcStmt <$> st_lst)
     other -> other
 
@@ -116,7 +116,7 @@ stmtParser = try skipPrePros
     <|> contParser
     <|> brkParser
     <|> doWhileParser
-    <|> lineParser 
+    <|> lineParser
     <?> "any statement"
 
 skipNewType :: Parser Stmt
@@ -134,10 +134,10 @@ skipPrePros = symbol "#" >>
             <|> (pRsrvd "undef" >> atomParser >> return OtherStmt))
 
 lineParser :: Parser Stmt
-lineParser = whiteSpace >> lookAhead (noneOf "{}") >> ((LineStmt . (:[])) . WildCard <$> skipTo ";") <?> "line"
+lineParser = whiteSpace >> lookAhead (noneOf "{}") >> LineStmt <$> getPosition <*> ((:[]) . WildCard <$> skipTo ";") <?> "line"
 
 returnParser :: Parser Stmt
-returnParser = ReturnStmt . WildCard <$> (reserved "return" *> skipTo ";") <?> "return statement"
+returnParser = ReturnStmt <$> pRsrvd "return" <*> (WildCard <$> skipTo ";") <?> "return statement"
 
 bodyParser :: Parser Stmt
 bodyParser = BodyStmt <$> braces (manyTill stmtParser (lookAhead (symbol "}")))
@@ -147,13 +147,13 @@ ifParser :: Parser Stmt
 ifParser = IfStmt <$> pRsrvd "if" <*> (WildCard <$> balancedP "(" ")") <*> bodyParser <*> optionMaybe elseParser <?> "if statement"
 
 elseParser :: Parser Stmt
-elseParser = reserved "else" >> (ifParser <|> bodyParser) <?> "optional else statement"
+elseParser = pRsrvd "else" >> (ifParser <|> bodyParser) <?> "optional else statement"
 
 whileParser :: Parser Stmt
 whileParser = WhileStmt <$> pRsrvd "while" <*> (WildCard <$> balancedP "(" ")") <*> bodyParser <?> "while statement"
 
 goToParser :: Parser Stmt
-goToParser = GotoStmt <$> (pRsrvd "goto" >> identifier) <?> "goto statement"
+goToParser = GotoStmt <$> pRsrvd "goto" <*> identifier <?> "goto statement"
 
 doWhileParser :: Parser Stmt
 doWhileParser = DoWhileStmt <$> pRsrvd "do" <*> bodyParser <*> (WildCard <$> (reserved "while" >> balancedP "(" ")" <* semi)) <?> "do-while statement"
@@ -183,18 +183,18 @@ forParser = do {
 } <?> "for statement"
 
 labelParser :: Parser Stmt
-labelParser = LabelStmt <$> (identifier <* symbol ":")
+labelParser = LabelStmt <$> getPosition <*> identifier <* symbol ":" <?> "label statement"
 
 contParser :: Parser Stmt
-contParser = reserved "continue" <* semi >> return CntStmt <?> "continue statement"
+contParser = CntStmt <$> pRsrvd "continue" <* semi <?> "continue statement"
 
 brkParser :: Parser Stmt
-brkParser = reserved "break" <* semi >> return BrkStmt <?> "break statement"
+brkParser = BrkStmt <$> pRsrvd "break" <* semi <?> "break statement"
 
 fnDecParser :: Parser Stmt
 fnDecParser = do {
-    pos <- typeParser >> getPosition <* whiteSpace;
-    name <- identifier;
+    pos <- typeParser >> getPosition;
+    name <- whiteSpace >> identifier;
     args <- lookAhead (symbol "(") >> balancedP "(" ")";
     try (symbol ";" >> return (FnDecStmt pos name [WildCard args] (BodyStmt [])))
     <|> FnDecStmt pos name [WildCard args] <$> bodyParser;
@@ -242,7 +242,7 @@ typeParser = buildExpressionParser speTpTbl (skipMany (pRsrvdTbl ["static", "inl
                     postfixChain refTpParser]]
 
 exprParser :: Parser [Expr]
-exprParser = try (((string ". . ." >> VoidExpr <$> getPosition) <|> (typeParser >>= varDecParser)) `sepBy1` comma)
+exprParser = try (((string ". . ." >> return VoidExpr) <|> (typeParser >>= varDecParser)) `sepBy1` comma)
             <|> try (do{ tp <- typeParser; varDecParser tp `sepBy1` comma; })
             <|> try (exprParser' `sepBy1` comma)
 
@@ -259,7 +259,7 @@ varDecParser :: Type -> Parser Expr
 varDecParser tp = do { var <- exprParser'; return $ VarDec (tp, var); } <?> "variable declaration"
 
 exprParser' :: Parser Expr
-exprParser' = whiteSpace *> (buildExpressionParser opTable term <|> VoidExpr <$> getPosition) <* whiteSpace
+exprParser' = whiteSpace *> (buildExpressionParser opTable term <|> return VoidExpr) <* whiteSpace
             <?> "expression"
 
 identParser :: Parser Expr
@@ -291,15 +291,15 @@ lstValParser :: Parser Expr
 lstValParser = do { pos <- getPosition; Atom pos . ListVal <$> braces (atomParser `sepBy` comma); } <?> "array"
 
 nullParser :: Parser Expr
-nullParser = do { pos <- getPosition <* reserved "NULL"; return $ Atom pos NullVal; } <?> "NULL"
+nullParser = do { pos <- pRsrvd "NULL"; return $ Atom pos NullVal; } <?> "NULL"
 
 intParser :: Parser Expr
 intParser = do { pos <- getPosition; Atom pos . IntVal <$> integer; } <?> "integer"
 
 boolParser :: Parser Expr
 boolParser = do {
-    pos <- getPosition;
-    (reserved "true" >> return (Atom pos . BoolVal $ True)) <|> (reserved "false" >> return (Atom pos . BoolVal $ False))
+    pos <- pRsrvd "true";
+    return (Atom pos . BoolVal $ True) <|> (reserved "false" >> return (Atom pos . BoolVal $ False))
 } <?> "bool"
 
 charParser :: Parser Expr
@@ -324,8 +324,8 @@ term = try $ parens exprParser' <|> atomParser
 terOpParser :: Parser (Expr -> Expr)
 terOpParser = do {
     pos <- getPosition;
-    trBr <- symbol "?" *> term;
-    elBr <- symbol ":" *> term;
+    trBr <- symbol "?" >> term;
+    elBr <- symbol ":" >> term;
     return $ \cond -> TernOp TerIfElse cond trBr elBr;
 } <?> "ternary operation"
 
