@@ -1,7 +1,7 @@
 module AST where
+import Text.Parsec ( SourcePos )
 
-import Text.Parsec
-import Data.List
+
 
 type Identifier = String
 
@@ -72,7 +72,6 @@ instance Eq Stmt where
         OtherStmt -> case y of
             OtherStmt -> True
             _ -> False
-
 
 data Expr = WildCard [String]
     | TernOp TerOpSym Expr Expr Expr
@@ -167,7 +166,6 @@ data Val = IntVal Integer
     | NullVal
     deriving (Show, Eq, Ord)
 
-
 data UnOpSym = Not
     | PreInc
     | PostInc
@@ -214,4 +212,3 @@ data BinOpSym = Add
 
 data TerOpSym = TerIfElse
     deriving (Show, Eq, Ord)
-
