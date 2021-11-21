@@ -3,6 +3,7 @@ import AST
 import Data.List ( sortBy )
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
+import Control.Monad ( void )
 import Text.ParserCombinators.Parsec.Language ( javaStyle )
 import qualified Text.ParserCombinators.Parsec.Token as Token
 
@@ -94,7 +95,7 @@ parseWcStmt stmt = case stmt of
     other -> other
 
 stmtParser :: Parser Stmt
-stmtParser = try skipPrePros
+stmtParser = try (skipMacro >> return OtherStmt)
     <|> try fnDecParser
     <|> try skipNewType
     <|> goToParser
@@ -114,17 +115,6 @@ stmtParser = try skipPrePros
 
 skipNewType :: Parser Stmt
 skipNewType = typeParser >> (lookAhead (symbol "{") >> balancedP "{" "}") >> lineParser >> return OtherStmt <?> "struct or union definition"
-
-skipPrePros :: Parser Stmt
-skipPrePros = symbol "#" >>
-            (try (pRsrvd "define" >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt)
-            {--(pRsrvd "define" >> ((identifier >> notFollowedBy (symbol "(")) <|> (identifier >> void (balancedP "(" ")")))
-                >> (try (void atomParser) <|> void (skipMany (noneOf "{(") >> ((lookAhead (symbol "(") >> balancedP "(" ")") <|> (lookAhead (symbol "{") >> balancedP "{" "}"))))
-                >> (try (reserved "while" >> skipMany1 (alphaNum <|> oneOf "() ") >> whiteSpace >> return OtherStmt) <|> return OtherStmt))--}
-            <|> (pRsrvdTbl ["error", "pragma"] >> skipMany1 (noneOf "\n\r") >> whiteSpace >> return OtherStmt)
-            <|> (pRsrvd "include" >> (try (angles (many1 (noneOf ">")) >> return OtherStmt) <|> try (stringLiteral >> whiteSpace >> return OtherStmt)))
-            <|> (pRsrvdTbl ["if", "ifdef", "ifndef"] >> skipTo "#endif" >> return OtherStmt)
-            <|> (pRsrvd "undef" >> atomParser <$> getPosition >> return OtherStmt))
 
 lineParser :: Parser Stmt
 lineParser = whiteSpace >> lookAhead (noneOf "{}") >> LineStmt <$> getPosition <*> ((:[]) . WildCard <$> skipTo ";") <?> "line"
@@ -187,7 +177,7 @@ brkParser = BrkStmt <$> pRsrvd "break" <* semi <?> "break statement"
 fnDecParser :: Parser Stmt
 fnDecParser = do {
     pos <- typeParser >> getPosition;
-    name <- whiteSpace >> identifier;
+    name <- identifier;
     args <- lookAhead (symbol "(") >> balancedP "(" ")";
     try (symbol ";" >> return (FnDecStmt pos name [WildCard args] (BodyStmt [])))
     <|> FnDecStmt pos name [WildCard args] <$> bodyParser;
@@ -195,6 +185,7 @@ fnDecParser = do {
 
 atomTpParser :: Parser Type
 atomTpParser = parseTpGroup LongLong ["long long int", "long long", "signed long long int", "signed long long", "intmax_t"]
+    <|> parseTpGroup LongDouble ["long double"]
     <|> parseTpGroup Long ["long int", "long", "signed long int", "signed long", "int_least64_t", "int_fast64_t", "int64_t"]
     <|> parseTpGroup UnsignedLongLong ["unsigned long long int", "unsigned long long", "uintmax_t"]
     <|> parseTpGroup UnsignedLong  ["unsigned long int", "unsigned long", "uint_least64_t", "uint_fast64_t", "uint64_t"]
@@ -207,7 +198,6 @@ atomTpParser = parseTpGroup LongLong ["long long int", "long long", "signed long
     <|> parseTpGroup Bool ["bool"]
     <|> parseTpGroup Float ["float"]
     <|> parseTpGroup Double ["double"]
-    <|> parseTpGroup LongDouble ["long double"]
     <|> parseTpGroup Void ["void"]
     <|> parseTpGroup Auto ["auto"]
     <|> choice (try . strUnEnParser <$> ["struct", "union", "enum"])
@@ -229,10 +219,13 @@ refTpParser :: Parser (Type -> Type)
 refTpParser = whiteSpace >> symbol "&" >> return Reference <?> "reference type"
 
 typeParser :: Parser Type
-typeParser = buildExpressionParser speTpTbl (skipMany (pRsrvdTbl ["static", "inline", "extern", "const", "typedef", "volatile", "register"]) *> atomTpParser <* whiteSpace) <?> "type"
+typeParser = clear *> buildExpressionParser speTpTbl (clear *> atomTpParser <* clear) <* clear <?> "type"
     where speTpTbl = [[prefix "const" Const,
                     postfixChain ptrTpParser,
                     postfixChain refTpParser]]
+          clear = whiteSpace >> skipMany (try $ pRsrvdTbl ["static", "__inline__", "inline", "extern", "const", "typedef", "volatile", "register"]
+                            <|> try (string "__attribute__" >> balancedP "(" ")" >> return "")
+                            <|> try (skipMacro >> return "")) >> whiteSpace
 
 exprParser :: SourcePos -> Parser [Expr]
 exprParser pos = try (((string ". . ." >> return VoidExpr) <|> (typeParser >>= varDecParser pos)) `sepBy1` comma)
@@ -394,7 +387,7 @@ pRsrvd :: String -> Parser SourcePos
 pRsrvd rsrvd = getPosition <* reserved rsrvd
 
 anyTkn :: Parser String
-anyTkn = whiteSpace >> lexeme (try (do {
+anyTkn = many skipMacro *> lexeme (try (do {
                 name <- identifier;
                 idx <- many1 (do { n <- brackets integer; return $ "[" ++ show n ++ "]"; });
                 return $ name ++ concat idx; }) -- variable and array accessing
@@ -409,14 +402,14 @@ anyTkn = whiteSpace >> lexeme (try (do {
         <|> try (pRsrvdTbl (sortBy tblDesc keySymbols)) -- reserved symbol
         <|> try (pRsrvdTbl (sortBy tblDesc keyWords)) -- reserved word
         <|> try (fmap show integer) -- integer
-        <|> try (eof >> string "") -- to avoid the infinite recursion 
-        )
+        <|> try (eof >> return "") -- to avoid the infinite recursion 
+        ) <* many skipMacro
         where tblDesc a b = compare (length b) (length a)
 
 pRsrvdTbl :: [String] -> Parser String
 pRsrvdTbl tbl = case tbl of
             [] -> fail "not in table"
-            (x:xs) -> try (string x) <* whiteSpace <|> pRsrvdTbl xs <* whiteSpace
+            (x:xs) -> whiteSpace *> try (string x) <* whiteSpace <|> whiteSpace *> pRsrvdTbl xs <* whiteSpace
 
 balancedP :: String -> String -> Parser [String]
 balancedP l r = whiteSpace *> balancedP' l r 0 0 [] <* whiteSpace
@@ -425,10 +418,14 @@ balancedP l r = whiteSpace *> balancedP' l r 0 0 [] <* whiteSpace
                         return $ (tail . init) acc
                     else
                         try (eof >> error ("cannot find balanced " ++ l ++ r))
+                        <|> try (skipMacro >> balancedP' l r lcnt rcnt acc)
                         <|> (symbol l >> balancedP' l r (lcnt + 1) rcnt (acc ++ [l]))
                         <|> try (symbol r >> balancedP' l r lcnt (rcnt + 1) (acc ++ [r]))
                         <|> try (do { tk <- anyTkn; balancedP' l r lcnt rcnt (acc ++ [tk]); })
                         <|> (semi >> balancedP' l r lcnt rcnt (acc ++ [";"]))
+
+skipMacro :: Parser ()
+skipMacro = whiteSpace >> symbol "#" >> skipMany (noneOf "\n\r") >> whiteSpace
 
 parseFile :: String -> IO [Stmt]
 parseFile f = do {
