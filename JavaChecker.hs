@@ -1,4 +1,4 @@
-import CParser
+import JavaParser
 import AST
 import Data.List ( (\\), intercalate, intersect, nub )
 import Control.Monad ( liftM2 )
@@ -9,24 +9,20 @@ findDeref :: [Expr] -> [Expr] -> [Expr]
 findDeref exLst acc = case exLst of
             [] -> acc
             (x:xs) -> case x of
-                UnaOp DeRef ex -> case ex of
-                    Ident {} -> findDeref xs (acc ++ [ex])
-                    _ -> findDeref xs acc
-                PtrMemAcc _ objOut memOut -> case objOut of
-                    PtrMemAcc _ objIn memIn -> findDeref [objOut] (acc ++ [memIn])
+                MemAcc _ objOut memOut -> case objOut of
+                    MemAcc _ objIn memIn -> findDeref [objOut] (acc ++ [memIn])
                     Ident {} -> findDeref xs (acc ++ [objOut])
                     _ -> findDeref xs acc
                 BinOp _ l r -> findDeref xs (acc ++ findDeref [l] [] ++ findDeref [r] [])
                 UnaOp _ ex -> findDeref xs (acc ++ findDeref [ex] [])
-                MemAcc _ obj mem -> findDeref xs (acc ++ findDeref [obj] [] ++ findDeref [mem] [])
                 ArrAcc _ arr idx -> findDeref xs (acc ++ findDeref [arr] [] ++ findDeref [idx] [])
                 Call _ _ exLst -> findDeref xs (acc ++ findDeref exLst [])
                 Assign _ _ val -> findDeref xs (acc ++ findDeref [val] [])
+                VarDec (_, ex) -> findDeref xs (acc ++ findDeref [ex] [])
                 _ -> findDeref xs acc
 
 isIdent :: Expr -> Maybe Expr
 isIdent ex = case ex of
-    UnaOp DeRef var -> Just var
     Ident {} -> Just ex
     _ -> Nothing
 
@@ -74,10 +70,7 @@ extractIdent :: [Expr] -> [Expr] -> [Expr]
 extractIdent exLst acc = case exLst of
     [] -> acc
     (x:xs) -> case x of
-        BinOp _ l r -> case (l, r) of
-            (Atom _ NullVal, _) -> extractIdent xs acc
-            (_, Atom _ NullVal) -> extractIdent xs acc
-            _ ->  extractIdent xs (acc ++ extractIdent [l] [] ++ extractIdent [r] [])
+        BinOp _ l r -> extractIdent xs (acc ++ extractIdent [l] [] ++ extractIdent [r] [])
         Ident _ var -> extractIdent xs (acc ++ [x])
         _ -> extractIdent xs acc
 
@@ -104,6 +97,11 @@ checkNullPtr acc notNull stmts = case stmts of
         FnDecStmt _ _ _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
         LineStmt _ exLst -> checkNullPtr acc (nub (findDeref exLst [] ++ notNull) \\ findAssign exLst []) xs
         BodyStmt stmts -> checkNullPtr acc notNull (stmts ++ xs)
+        IterStmt _ _ _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
+        TryStmt _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
+        CatchStmt _ _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
+        FinalStmt _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
+        ClassStmt _ body -> checkNullPtr (acc ++ checkNullPtr [] notNull [body]) notNull xs
         _ -> checkNullPtr acc notNull xs
 
 checkFor :: [String] -> [Stmt] -> [String]

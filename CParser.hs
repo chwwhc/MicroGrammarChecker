@@ -83,7 +83,7 @@ parseWcStmt stmt = case stmt of
     IfStmt pos ex trBr (Just elBr) -> IfStmt pos (head (parseExpr pos [ex])) (parseWcStmt trBr) (Just (parseWcStmt elBr))
     WhileStmt pos ex st -> WhileStmt pos (head (parseExpr pos [ex])) (parseWcStmt st)
     DoWhileStmt pos st ex -> DoWhileStmt pos (parseWcStmt st) (head (parseExpr pos [ex]))
-    ForStmt pos dec cond upd st -> ForStmt pos (head $ parseExpr pos [dec]) (head (parseExpr pos [cond])) (head (parseExpr pos [upd])) (parseWcStmt st)
+    ForStmt pos dec cond upd st -> ForStmt pos (head (parseExpr pos [dec])) (head (parseExpr pos [cond])) (head (parseExpr pos [upd])) (parseWcStmt st)
     SwitchStmt pos ex st -> SwitchStmt pos (head (parseExpr pos [ex])) (parseWcStmt st)
     CaseStmt pos ex st -> CaseStmt pos (head (parseExpr pos [ex])) (parseWcStmt st)
     DfltStmt pos st -> DfltStmt pos (parseWcStmt st)

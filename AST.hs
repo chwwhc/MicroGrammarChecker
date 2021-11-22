@@ -11,6 +11,10 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ForStmt SourcePos Expr Expr Expr Stmt
     | CntStmt SourcePos
     | BrkStmt SourcePos 
+    | IterStmt SourcePos Expr Expr Stmt
+    | TryStmt SourcePos Stmt
+    | CatchStmt SourcePos Expr Stmt 
+    | FinalStmt SourcePos Stmt
     | LabelStmt SourcePos Identifier
     | SwitchStmt SourcePos Expr Stmt
     | CaseStmt SourcePos Expr Stmt
@@ -19,11 +23,25 @@ data Stmt = IfStmt SourcePos Expr Stmt (Maybe Stmt)
     | ReturnStmt SourcePos Expr
     | LineStmt SourcePos [Expr]
     | GotoStmt SourcePos Identifier
+    | ClassStmt Identifier Stmt
     | OtherStmt
     | BodyStmt [Stmt]
     deriving (Show)
 instance Eq Stmt where
     x == y = case x of
+        ClassStmt {} -> False 
+        IterStmt _ dec1 name1 body1 -> case y of 
+            IterStmt _ dec2 name2 body2 -> dec1 == dec2 && name1 == name2 && body1 == body2 
+            _ -> False 
+        TryStmt _ body1 -> case y of 
+            TryStmt _ body2 -> body1 == body2 
+            _ -> False 
+        CatchStmt _ ex1 body1 -> case y of 
+            CatchStmt _ ex2 body2 -> ex1 == ex2 && body1 == body2 
+            _ -> False
+        FinalStmt _ body1 -> case y of 
+            FinalStmt _ body2 -> body1 == body2 
+            _ -> False
         IfStmt _ ex1 _ _ -> case y of
             IfStmt _ ex2 _ _ -> ex1 == ex2
             _ -> False
@@ -147,13 +165,13 @@ data Type = Int
     | UnsignedChar
     | Void
     | Auto
-    | Array
     | Pointer Type
     | Reference Type
     | Struct Identifier
     | Union Identifier
     | Enum Identifier
     | Const Type
+    | Array Type
     | UnknownType Identifier
     deriving (Show, Eq, Ord)
 

@@ -1,0 +1,2 @@
+dereferencing a pointer that could be null in the if statement at (line 46, column 3): variable I0 at (line 13, column 3)
+dereferencing a pointer that could be null in the if statement at (line 47, column 3): variable I1 at (line 15, column 3)
